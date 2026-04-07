@@ -1,0 +1,44 @@
+mod commands;
+mod hosts;
+mod schemes;
+mod tray;
+
+use std::sync::Mutex;
+use tauri::Manager;
+use commands::schemes::AppState;
+use schemes::SchemeManager;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let scheme_manager = SchemeManager::new().expect("Failed to initialize SchemeManager");
+    
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .manage(AppState {
+            scheme_manager: Mutex::new(scheme_manager),
+        })
+        .setup(|app| {
+            #[cfg(debug_assertions)]
+            {
+                let window = app.get_webview_window("main").unwrap();
+                window.open_devtools();
+            }
+            
+            tray::setup_tray(&app.handle())?;
+            
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::greet,
+            commands::hosts::get_hosts_content,
+            commands::hosts::write_hosts_content,
+            commands::schemes::get_all_schemes,
+            commands::schemes::create_scheme,
+            commands::schemes::update_scheme,
+            commands::schemes::delete_scheme,
+            commands::schemes::switch_scheme,
+            commands::schemes::fetch_remote_hosts,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
