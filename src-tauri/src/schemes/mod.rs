@@ -12,6 +12,16 @@ pub struct Scheme {
     pub name: String,
     pub content: String,
     #[serde(default)]
+    pub remote_url: Option<String>,
+    #[serde(default)]
+    pub auto_sync_enabled: bool,
+    #[serde(default)]
+    pub sync_interval_minutes: Option<u64>,
+    #[serde(default)]
+    pub last_synced_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub last_sync_error: Option<String>,
+    #[serde(default)]
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -24,6 +34,11 @@ impl Scheme {
             id: uuid::Uuid::new_v4().to_string(),
             name,
             content,
+            remote_url: None,
+            auto_sync_enabled: false,
+            sync_interval_minutes: None,
+            last_synced_at: None,
+            last_sync_error: None,
             enabled: false,
             created_at: now,
             updated_at: now,

@@ -50,6 +50,8 @@ pub fn run() {
             commands::schemes::set_scheme_enabled,
             commands::schemes::export_schemes,
             commands::schemes::import_schemes,
+            commands::schemes::update_scheme_remote_config,
+            commands::schemes::sync_remote_scheme,
             commands::schemes::fetch_remote_hosts,
             commands::updates::check_for_updates,
         ])

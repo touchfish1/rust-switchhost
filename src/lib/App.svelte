@@ -9,11 +9,17 @@
   import Editor from './components/Editor.svelte'
   import ThemeToggle from './components/ThemeToggle.svelte'
   import Modal from './components/Modal.svelte'
+  import RemoteSyncModal from './components/RemoteSyncModal.svelte'
   
   interface Scheme {
     id: string
     name: string
     content: string
+    remote_url?: string | null
+    auto_sync_enabled?: boolean
+    sync_interval_minutes?: number | null
+    last_synced_at?: string | null
+    last_sync_error?: string | null
     enabled: boolean
     created_at: string
     updated_at: string
@@ -51,6 +57,7 @@
   let showDeleteModal = false
   let showCurrentHostsModal = false
   let showUpdateModal = false
+  let showRemoteSyncModal = false
   let deleteTargetId: string | null = null
   let newSchemeName = ''
   let currentHostsContent = ''
@@ -60,6 +67,10 @@
   let updateProgressText = ''
   let hasPendingUpdate = false
   let updateCheckTimer: ReturnType<typeof setInterval> | null = null
+  let remoteSyncTimer: ReturnType<typeof setInterval> | null = null
+  let isSavingRemoteConfig = false
+  let isSyncingRemoteScheme = false
+  const syncingSchemeIds = new Set<string>()
   
   onMount(async () => {
     const savedTheme = localStorage.getItem('theme')
@@ -77,12 +88,21 @@
     updateCheckTimer = setInterval(() => {
       void checkForUpdatesSilently()
     }, 15 * 60 * 1000)
+
+    remoteSyncTimer = setInterval(() => {
+      void runScheduledRemoteSync()
+    }, 60 * 1000)
   })
 
   onDestroy(() => {
     if (updateCheckTimer) {
       clearInterval(updateCheckTimer)
       updateCheckTimer = null
+    }
+
+    if (remoteSyncTimer) {
+      clearInterval(remoteSyncTimer)
+      remoteSyncTimer = null
     }
   })
 
@@ -131,6 +151,15 @@
     activeSchemeId = id
     activeScheme = schemes.find(s => s.id === id) || null
     editorContent = activeScheme?.content || ''
+  }
+
+  function applyUpdatedScheme(updatedScheme: Scheme) {
+    schemes = schemes.map((scheme) => (scheme.id === updatedScheme.id ? updatedScheme : scheme))
+
+    if (activeSchemeId === updatedScheme.id) {
+      activeScheme = updatedScheme
+      editorContent = updatedScheme.content
+    }
   }
 
   async function checkHostsPermission() {
@@ -386,6 +415,100 @@
     }
   }
 
+  function openRemoteSyncSettings() {
+    if (!activeScheme) return
+    showRemoteSyncModal = true
+  }
+
+  async function handleSaveRemoteSyncConfig(event: CustomEvent) {
+    if (!activeSchemeId) return
+
+    const remoteUrl = event.detail.remoteUrl as string
+    const autoSyncEnabled = event.detail.autoSyncEnabled as boolean
+    const syncIntervalInput = event.detail.syncIntervalMinutes as string
+    const syncIntervalMinutes = syncIntervalInput ? Number(syncIntervalInput) : null
+
+    if (autoSyncEnabled && (!syncIntervalMinutes || syncIntervalMinutes <= 0)) {
+      error = '启用自动同步时，请填写大于 0 的同步间隔'
+      return
+    }
+
+    try {
+      isSavingRemoteConfig = true
+      error = null
+      const updated = await invoke<Scheme>('update_scheme_remote_config', {
+        id: activeSchemeId,
+        remoteUrl: remoteUrl || null,
+        autoSyncEnabled,
+        syncIntervalMinutes
+      })
+      applyUpdatedScheme(updated)
+      showRemoteSyncModal = false
+      showSuccessToast('远程同步设置已保存')
+    } catch (e) {
+      error = `保存远程同步设置失败: ${e}`
+      console.error('Failed to save remote sync config:', e)
+    } finally {
+      isSavingRemoteConfig = false
+    }
+  }
+
+  async function syncSchemeById(id: string, silent = false) {
+    if (syncingSchemeIds.has(id)) return
+
+    try {
+      syncingSchemeIds.add(id)
+      if (!silent) {
+        isSyncingRemoteScheme = true
+        isLoading = true
+        error = null
+      }
+
+      const updated = await invoke<Scheme>('sync_remote_scheme', { id })
+      applyUpdatedScheme(updated)
+
+      if (!silent) {
+        showSuccessToast('远程分组同步成功')
+      }
+    } catch (e) {
+      if (!silent) {
+        error = `同步远程分组失败: ${e}`
+      }
+      console.error('Failed to sync remote scheme:', e)
+      await loadSchemes()
+    } finally {
+      syncingSchemeIds.delete(id)
+      if (!silent) {
+        isSyncingRemoteScheme = false
+        isLoading = false
+      }
+    }
+  }
+
+  async function handleSyncActiveScheme() {
+    if (!activeSchemeId) return
+    await syncSchemeById(activeSchemeId, false)
+  }
+
+  async function runScheduledRemoteSync() {
+    const now = Date.now()
+
+    for (const scheme of schemes) {
+      const remoteUrl = scheme.remote_url?.trim()
+      const interval = scheme.sync_interval_minutes
+      if (!scheme.auto_sync_enabled || !remoteUrl || !interval || interval <= 0) {
+        continue
+      }
+
+      const lastSyncedAt = scheme.last_synced_at ? new Date(scheme.last_synced_at).getTime() : 0
+      const due = lastSyncedAt === 0 || now - lastSyncedAt >= interval * 60 * 1000
+
+      if (due) {
+        await syncSchemeById(scheme.id, true)
+      }
+    }
+  }
+
   async function handleExportSchemes() {
     try {
       const exportPath = await save({
@@ -519,10 +642,30 @@
     <div class="content">
       {#if activeScheme}
         <div class="editor-header">
-          <h2>{activeScheme.name}</h2>
-          <span class="scheme-meta">
-            分组内容编辑中 | 创建于 {new Date(activeScheme.created_at).toLocaleString()}
-          </span>
+          <div class="editor-title">
+            <h2>{activeScheme.name}</h2>
+            <span class="scheme-meta">
+              分组内容编辑中 | 创建于 {new Date(activeScheme.created_at).toLocaleString()}
+            </span>
+            {#if activeScheme.remote_url}
+              <span class="remote-meta">
+                远程源已配置
+                {#if activeScheme.auto_sync_enabled && activeScheme.sync_interval_minutes}
+                  · 每 {activeScheme.sync_interval_minutes} 分钟同步
+                {/if}
+              </span>
+            {/if}
+          </div>
+          <div class="editor-actions">
+            <button class="btn-secondary" on:click={openRemoteSyncSettings}>
+              远程同步设置
+            </button>
+            {#if activeScheme.remote_url}
+              <button class="btn-secondary" on:click={handleSyncActiveScheme} disabled={isSyncingRemoteScheme || isLoading}>
+                {isSyncingRemoteScheme ? '同步中...' : '立即同步'}
+              </button>
+            {/if}
+          </div>
         </div>
         
         <Editor
@@ -699,6 +842,23 @@
         </div>
       </div>
     </div>
+  {/if}
+
+  {#if showRemoteSyncModal && activeScheme}
+    <RemoteSyncModal
+      isOpen={showRemoteSyncModal}
+      schemeName={activeScheme.name}
+      remoteUrl={activeScheme.remote_url || ''}
+      autoSyncEnabled={activeScheme.auto_sync_enabled || false}
+      syncIntervalMinutes={activeScheme.sync_interval_minutes ? String(activeScheme.sync_interval_minutes) : ''}
+      lastSyncedAt={activeScheme.last_synced_at ? new Date(activeScheme.last_synced_at).toLocaleString() : ''}
+      lastSyncError={activeScheme.last_sync_error || ''}
+      isSaving={isSavingRemoteConfig}
+      isSyncing={isSyncingRemoteScheme}
+      on:save={handleSaveRemoteSyncConfig}
+      on:sync={handleSyncActiveScheme}
+      on:close={() => { showRemoteSyncModal = false }}
+    />
   {/if}
 </div>
 
@@ -964,10 +1124,28 @@
     font-weight: 600;
     color: var(--text-primary);
   }
+
+  .editor-title {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .editor-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
   
   .scheme-meta {
     font-size: 13px;
     color: var(--text-secondary);
+  }
+
+  .remote-meta {
+    font-size: 12px;
+    color: var(--primary-color);
   }
   
   .empty-state {

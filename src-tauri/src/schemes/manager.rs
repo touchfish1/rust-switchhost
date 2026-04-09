@@ -96,6 +96,15 @@ impl SchemeManager {
         }
     }
 
+    pub fn get_scheme(&self, id: &str) -> io::Result<Scheme> {
+        self.config
+            .schemes
+            .iter()
+            .find(|scheme| scheme.id == id)
+            .cloned()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Scheme not found"))
+    }
+
     pub fn delete_scheme(&mut self, id: &str) -> io::Result<()> {
         let was_enabled = self
             .config
@@ -167,6 +176,88 @@ impl SchemeManager {
         self.apply_active_schemes_for_current_platform()?;
         self.sync_enabled_flags();
         self.save_config().and_then(|_| self.get_all_schemes())
+    }
+
+    pub fn update_scheme_remote_config(
+        &mut self,
+        id: &str,
+        remote_url: Option<String>,
+        auto_sync_enabled: bool,
+        sync_interval_minutes: Option<u64>,
+    ) -> io::Result<Scheme> {
+        let normalized_url = remote_url.and_then(|url| {
+            let trimmed = url.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        });
+
+        if auto_sync_enabled && (normalized_url.is_none() || sync_interval_minutes.unwrap_or(0) == 0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "启用自动同步前请先填写远程 URL 和同步间隔",
+            ));
+        }
+
+        if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
+            scheme.remote_url = normalized_url;
+            scheme.auto_sync_enabled = auto_sync_enabled;
+            scheme.sync_interval_minutes = if auto_sync_enabled {
+                sync_interval_minutes
+            } else {
+                sync_interval_minutes.filter(|interval| *interval > 0)
+            };
+
+            if scheme.remote_url.is_none() {
+                scheme.auto_sync_enabled = false;
+                scheme.sync_interval_minutes = None;
+                scheme.last_sync_error = None;
+            }
+
+            scheme.updated_at = Utc::now();
+            let updated = scheme.clone();
+            self.save_config()?;
+            Ok(updated)
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotFound, "Scheme not found"))
+        }
+    }
+
+    pub fn apply_remote_scheme_content(&mut self, id: &str, content: String) -> io::Result<Scheme> {
+        let is_enabled = self
+            .active_ids_for_platform(&Self::current_platform())
+            .iter()
+            .any(|scheme_id| scheme_id == id);
+
+        if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
+            scheme.content = content;
+            scheme.last_synced_at = Some(Utc::now());
+            scheme.last_sync_error = None;
+            scheme.updated_at = Utc::now();
+        } else {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "Scheme not found"));
+        }
+
+        if is_enabled {
+            self.apply_active_schemes_for_current_platform()?;
+        }
+
+        self.sync_enabled_flags();
+        self.save_config()?;
+        self.get_scheme(id)
+    }
+
+    pub fn mark_remote_sync_error(&mut self, id: &str, error_message: String) -> io::Result<Scheme> {
+        if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
+            scheme.last_sync_error = Some(error_message);
+            scheme.updated_at = Utc::now();
+            self.save_config()?;
+            self.get_scheme(id)
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotFound, "Scheme not found"))
+        }
     }
 
     pub fn export_schemes(&self, export_path: PathBuf) -> io::Result<()> {
