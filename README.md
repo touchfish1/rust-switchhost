@@ -51,6 +51,23 @@ npm run tauri build
 
 构建产物位于 `src-tauri/target/release/bundle/` 目录。
 
+### GitHub Release 自动发布
+
+项目已包含 GitHub Actions 发布工作流：
+
+- 工作流文件：`.github/workflows/release.yml`
+- 触发方式：推送 `v*` 格式的 tag，例如 `v0.1.0`
+- 发布结果：自动构建 Windows / macOS / Linux 安装包，并上传到对应的 GitHub Release
+
+示例发布流程：
+
+```bash
+git tag v0.1.0
+git push githost v0.1.0
+```
+
+也可以在 GitHub Actions 页面手动触发 `Release` 工作流，并填写 `release_tag`。
+
 ## 📁 项目结构
 
 ```
