@@ -13,6 +13,7 @@ pub fn run() {
     let scheme_manager = SchemeManager::new().expect("Failed to initialize SchemeManager");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState {
@@ -38,6 +39,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::restart_app,
+            commands::hosts::check_hosts_permission,
             commands::hosts::get_hosts_content,
             commands::hosts::write_hosts_content,
             commands::schemes::get_all_schemes,
@@ -46,6 +48,8 @@ pub fn run() {
             commands::schemes::delete_scheme,
             commands::schemes::switch_scheme,
             commands::schemes::set_scheme_enabled,
+            commands::schemes::export_schemes,
+            commands::schemes::import_schemes,
             commands::schemes::fetch_remote_hosts,
             commands::updates::check_for_updates,
         ])

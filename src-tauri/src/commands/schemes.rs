@@ -1,5 +1,6 @@
 use crate::schemes::{Scheme, SchemeManager};
 use std::sync::Mutex;
+use std::path::PathBuf;
 use tauri::State;
 
 pub struct AppState {
@@ -58,6 +59,22 @@ pub fn set_scheme_enabled(
     let mut manager = state.scheme_manager.lock().map_err(|e| e.to_string())?;
     manager
         .set_scheme_enabled(&id, enabled)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn export_schemes(state: State<AppState>, path: String) -> Result<(), String> {
+    let manager = state.scheme_manager.lock().map_err(|e| e.to_string())?;
+    manager
+        .export_schemes(PathBuf::from(path))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn import_schemes(state: State<AppState>, path: String) -> Result<Vec<Scheme>, String> {
+    let mut manager = state.scheme_manager.lock().map_err(|e| e.to_string())?;
+    manager
+        .import_schemes(PathBuf::from(path))
         .map_err(|e| e.to_string())
 }
 

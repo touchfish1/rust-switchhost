@@ -169,6 +169,33 @@ impl SchemeManager {
         self.save_config().and_then(|_| self.get_all_schemes())
     }
 
+    pub fn export_schemes(&self, export_path: PathBuf) -> io::Result<()> {
+        let content = serde_json::to_string_pretty(&self.config)?;
+        fs::write(export_path, content)
+    }
+
+    pub fn import_schemes(&mut self, import_path: PathBuf) -> io::Result<Vec<Scheme>> {
+        let content = fs::read_to_string(import_path)?;
+        let imported_config: SchemeConfig = serde_json::from_str(&content).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid import file: {}", error),
+            )
+        })?;
+
+        for imported_scheme in imported_config.schemes {
+            let mut scheme = imported_scheme;
+            scheme.id = uuid::Uuid::new_v4().to_string();
+            scheme.enabled = false;
+            scheme.name = self.make_unique_scheme_name(&scheme.name);
+            scheme.updated_at = Utc::now();
+            self.config.schemes.push(scheme);
+        }
+
+        self.sync_enabled_flags();
+        self.save_config().and_then(|_| self.get_all_schemes())
+    }
+
     fn save_config(&self) -> io::Result<()> {
         let content = serde_json::to_string_pretty(&self.config)?;
         match fs::write(&self.config_path, &content) {
@@ -237,6 +264,26 @@ impl SchemeManager {
 
         let merged = merged_contents.join("\n\n");
         hosts::write_hosts_file(&merged)
+    }
+
+    fn make_unique_scheme_name(&self, base_name: &str) -> String {
+        if !self.config.schemes.iter().any(|scheme| scheme.name == base_name) {
+            return base_name.to_string();
+        }
+
+        let mut index = 1;
+        loop {
+            let candidate = format!("{} ({})", base_name, index);
+            if !self
+                .config
+                .schemes
+                .iter()
+                .any(|scheme| scheme.name == candidate)
+            {
+                return candidate;
+            }
+            index += 1;
+        }
     }
 }
 

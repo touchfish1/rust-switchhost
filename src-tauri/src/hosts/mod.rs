@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::fs::OpenOptions;
 use std::path::PathBuf;
 
 pub fn get_hosts_path() -> PathBuf {
@@ -30,6 +31,11 @@ pub fn get_backup_dir() -> PathBuf {
 pub fn read_hosts_file() -> io::Result<String> {
     let path = get_hosts_path();
     fs::read_to_string(path)
+}
+
+pub fn can_write_hosts_file() -> io::Result<()> {
+    let path = get_hosts_path();
+    OpenOptions::new().read(true).write(true).open(path).map(|_| ())
 }
 
 pub fn write_hosts_file(content: &str) -> io::Result<()> {

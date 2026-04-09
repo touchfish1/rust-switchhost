@@ -18,6 +18,16 @@
   function createNewScheme() {
     dispatch('create')
   }
+
+  function importSchemes(event: Event) {
+    event.stopPropagation()
+    dispatch('import')
+  }
+
+  function exportSchemes(event: Event) {
+    event.stopPropagation()
+    dispatch('export')
+  }
   
   function deleteScheme(id: string, event: Event) {
     event.stopPropagation()
@@ -98,6 +108,30 @@
     >
       <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
         <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64z m192 472c0 4.4-3.6 8-8 8H544v152c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V544H328c-4.4 0-8-3.6-8-8v-48c0-4.4 3.6-8 8-8h152V328c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v152h152c4.4 0 8 3.6 8 8v48z"/>
+      </svg>
+    </button>
+    <button
+      class="btn-toolbar"
+      on:click={importSchemes}
+      title="导入分组"
+      aria-label="导入分组"
+    >
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3v12"/>
+        <path d="m7 10 5 5 5-5"/>
+        <path d="M5 21h14"/>
+      </svg>
+    </button>
+    <button
+      class="btn-toolbar"
+      on:click={exportSchemes}
+      title="导出分组"
+      aria-label="导出分组"
+    >
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 21V9"/>
+        <path d="m17 14-5-5-5 5"/>
+        <path d="M5 3h14"/>
       </svg>
     </button>
   </div>
@@ -232,6 +266,7 @@
   }
   
   .btn-new {
+    margin-left: auto;
     width: 32px;
     height: 32px;
     border-radius: 6px;
@@ -258,6 +293,27 @@
   
   .btn-new:active {
     transform: scale(0.95);
+  }
+
+  .btn-toolbar {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    background: transparent;
+    color: var(--text-primary, #213547);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    padding: 0;
+  }
+
+  .btn-toolbar:hover {
+    color: var(--primary-color, #1890ff);
+    border-color: var(--primary-color, #1890ff);
+    background: var(--hover-bg, #e6f7ff);
   }
   
   .scheme-list {

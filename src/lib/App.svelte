@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte'
   import { getVersion } from '@tauri-apps/api/app'
   import { invoke } from '@tauri-apps/api/core'
+  import { open as openDialog, save } from '@tauri-apps/plugin-dialog'
   import { open } from '@tauri-apps/plugin-shell'
   import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
   import Sidebar from './components/Sidebar.svelte'
@@ -28,6 +29,13 @@
     html_url: string
     download_url: string | null
   }
+
+  interface HostsPermissionInfo {
+    has_permission: boolean
+    hosts_path: string
+    platform: string
+    message: string
+  }
   
   let schemes: Scheme[] = []
   let activeSchemeId: string | null = null
@@ -37,6 +45,7 @@
   let error: string | null = null
   let isDarkMode = false
   let appVersion = ''
+  let hostsPermissionInfo: HostsPermissionInfo | null = null
   
   let showCreateModal = false
   let showDeleteModal = false
@@ -60,7 +69,8 @@
 
     await Promise.all([
       loadAppVersion(),
-      loadSchemes()
+      loadSchemes(),
+      checkHostsPermission()
     ])
 
     await checkForUpdatesSilently()
@@ -121,6 +131,15 @@
     activeSchemeId = id
     activeScheme = schemes.find(s => s.id === id) || null
     editorContent = activeScheme?.content || ''
+  }
+
+  async function checkHostsPermission() {
+    try {
+      hostsPermissionInfo = await invoke<HostsPermissionInfo>('check_hosts_permission')
+    } catch (e) {
+      console.error('Failed to check hosts permission:', e)
+      hostsPermissionInfo = null
+    }
   }
 
   async function openCurrentHostsModal() {
@@ -366,6 +385,66 @@
       isLoading = false
     }
   }
+
+  async function handleExportSchemes() {
+    try {
+      const exportPath = await save({
+        title: '导出分组',
+        defaultPath: `rust-switchhost-schemes-${appVersion || 'backup'}.json`,
+        filters: [
+          {
+            name: 'JSON',
+            extensions: ['json']
+          }
+        ]
+      })
+
+      if (!exportPath) return
+
+      isLoading = true
+      error = null
+      await invoke('export_schemes', { path: exportPath })
+      showSuccessToast('分组已导出')
+    } catch (e) {
+      error = `导出分组失败: ${e}`
+      console.error('Failed to export schemes:', e)
+    } finally {
+      isLoading = false
+    }
+  }
+
+  async function handleImportSchemes() {
+    try {
+      const importPath = await openDialog({
+        title: '导入分组',
+        multiple: false,
+        directory: false,
+        filters: [
+          {
+            name: 'JSON',
+            extensions: ['json']
+          }
+        ]
+      })
+
+      if (!importPath || Array.isArray(importPath)) return
+
+      isLoading = true
+      error = null
+      schemes = await invoke('import_schemes', { path: importPath })
+      activeScheme = activeSchemeId
+        ? schemes.find((scheme) => scheme.id === activeSchemeId) || schemes[0] || null
+        : schemes[0] || null
+      activeSchemeId = activeScheme?.id || null
+      editorContent = activeScheme?.content || ''
+      showSuccessToast('分组已导入，导入项默认未启用')
+    } catch (e) {
+      error = `导入分组失败: ${e}`
+      console.error('Failed to import schemes:', e)
+    } finally {
+      isLoading = false
+    }
+  }
   
   function showSuccessToast(message: string) {
     const toast = document.createElement('div')
@@ -414,6 +493,15 @@
       <button on:click={() => error = null}>×</button>
     </div>
   {/if}
+
+  {#if hostsPermissionInfo && !hostsPermissionInfo.has_permission}
+    <div class="permission-banner">
+      <div>
+        <strong>Hosts 权限不足</strong>
+        <span>{hostsPermissionInfo.message}</span>
+      </div>
+    </div>
+  {/if}
   
   <div class="main">
     <Sidebar
@@ -421,6 +509,8 @@
       {activeSchemeId}
       on:select={(e) => handleSelectScheme(e.detail.id)}
       on:create={openCreateModal}
+      on:import={handleImportSchemes}
+      on:export={handleExportSchemes}
       on:delete={(e) => openDeleteModal(e.detail.id)}
       on:rename={handleRename}
       on:toggle={handleToggleScheme}
@@ -807,6 +897,35 @@
   .dark .error-banner {
     background: #2a1f1f;
     border-bottom-color: #5a3030;
+  }
+
+  .permission-banner {
+    padding: 12px 24px;
+    background: #fffbe6;
+    border-bottom: 1px solid #ffe58f;
+    color: #ad6800;
+    display: flex;
+    align-items: center;
+  }
+
+  .permission-banner div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .permission-banner strong {
+    font-size: 14px;
+  }
+
+  .permission-banner span {
+    font-size: 13px;
+  }
+
+  .dark .permission-banner {
+    background: #2b2615;
+    border-bottom-color: #6b5b18;
+    color: #ffd666;
   }
   
   .error-banner button {
