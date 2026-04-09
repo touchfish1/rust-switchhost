@@ -3,12 +3,16 @@
   
   export let schemes: any[] = []
   export let activeSchemeId: string | null = null
+  export let width = 320
   
   const dispatch = createEventDispatcher()
   
   let editingId: string | null = null
   let editingName = ''
   let editInput: HTMLInputElement | null = null
+  let isResizing = false
+  let startX = 0
+  let startWidth = width
   
   function selectScheme(id: string) {
     if (editingId === id) return
@@ -17,6 +21,32 @@
   
   function createNewScheme() {
     dispatch('create')
+  }
+
+  function handleResizeMove(event: MouseEvent) {
+    if (!isResizing) return
+    const nextWidth = Math.min(520, Math.max(280, startWidth + event.clientX - startX))
+    dispatch('resize', { width: nextWidth })
+  }
+
+  function stopResize() {
+    isResizing = false
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    window.removeEventListener('mousemove', handleResizeMove)
+    window.removeEventListener('mouseup', stopResize)
+  }
+
+  function startResize(event: MouseEvent) {
+    event.preventDefault()
+    event.stopPropagation()
+    isResizing = true
+    startX = event.clientX
+    startWidth = width
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', handleResizeMove)
+    window.addEventListener('mouseup', stopResize)
   }
 
   function importSchemes(event: Event) {
@@ -92,48 +122,56 @@
   
   onDestroy(() => {
     window.removeEventListener('keydown', handleKeydown)
+    stopResize()
   })
 </script>
 
-<div class="sidebar">
+<div class="sidebar" style={`width: ${width}px;`}>
   <div class="sidebar-header">
     <div class="header-copy">
       <h2>分组列表</h2>
       <span class="header-subtitle">勾选后立即生效，可同时启用多个分组</span>
     </div>
-    <button 
-      class="btn-new" 
-      on:click={createNewScheme} 
-      title="新建分组 (Ctrl+N)"
-    >
-      <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
-        <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64z m192 472c0 4.4-3.6 8-8 8H544v152c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V544H328c-4.4 0-8-3.6-8-8v-48c0-4.4 3.6-8 8-8h152V328c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v152h152c4.4 0 8 3.6 8 8v48z"/>
-      </svg>
-    </button>
-    <button
-      class="btn-toolbar"
-      on:click={importSchemes}
-      title="导入分组"
-      aria-label="导入分组"
-    >
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 3v12"/>
-        <path d="m7 10 5 5 5-5"/>
-        <path d="M5 21h14"/>
-      </svg>
-    </button>
-    <button
-      class="btn-toolbar"
-      on:click={exportSchemes}
-      title="导出分组"
-      aria-label="导出分组"
-    >
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 21V9"/>
-        <path d="m17 14-5-5-5 5"/>
-        <path d="M5 3h14"/>
-      </svg>
-    </button>
+    <div class="header-actions">
+      <div class="toolbar-group">
+        <button 
+          class="btn-new" 
+          on:click={createNewScheme} 
+          title="新建分组 (Ctrl+N)"
+        >
+          <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
+            <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64z m192 472c0 4.4-3.6 8-8 8H544v152c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V544H328c-4.4 0-8-3.6-8-8v-48c0-4.4 3.6-8 8-8h152V328c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v152h152c4.4 0 8 3.6 8 8v48z"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="toolbar-group toolbar-group-muted">
+        <button
+          class="btn-toolbar"
+          on:click={importSchemes}
+          title="导入分组"
+          aria-label="导入分组"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"/>
+            <path d="m7 10 5 5 5-5"/>
+            <path d="M5 21h14"/>
+          </svg>
+        </button>
+        <button
+          class="btn-toolbar"
+          on:click={exportSchemes}
+          title="导出分组"
+          aria-label="导出分组"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 21V9"/>
+            <path d="m17 14-5-5-5 5"/>
+            <path d="M5 3h14"/>
+          </svg>
+        </button>
+      </div>
+    </div>
   </div>
   
   <div class="scheme-list">
@@ -226,16 +264,26 @@
       <span class="hint-text">勾选后立即生效，并可同时启用多个分组</span>
     </div>
   </div>
+
+  <button
+    class="resize-handle"
+    on:mousedown={startResize}
+    type="button"
+    aria-label="调整分组列表宽度"
+  ></button>
 </div>
 
 <style>
   .sidebar {
-    width: 280px;
     background: var(--sidebar-bg, #f5f5f5);
     border-right: 1px solid var(--border-color, #e0e0e0);
     display: flex;
     flex-direction: column;
     height: 100%;
+    flex-shrink: 0;
+    position: relative;
+    min-width: 280px;
+    max-width: 520px;
   }
   
   .sidebar-header {
@@ -243,7 +291,8 @@
     border-bottom: 1px solid var(--border-color, #e0e0e0);
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
+    gap: 16px;
     background: var(--editor-bg, #ffffff);
   }
 
@@ -263,6 +312,25 @@
   .header-subtitle {
     font-size: 11px;
     color: var(--text-secondary, #8c8c8c);
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-left: auto;
+    padding-left: 12px;
+  }
+
+  .toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .toolbar-group-muted {
+    padding-left: 14px;
+    border-left: 1px solid var(--border-color, #e0e0e0);
   }
   
   .btn-new {
@@ -569,5 +637,33 @@
     font-size: 12px;
     color: var(--text-secondary, #8c8c8c);
     opacity: 0.7;
+  }
+
+  .resize-handle {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 2;
+    border: none;
+    padding: 0;
+    background: transparent;
+  }
+
+  .resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 2px;
+    width: 2px;
+    height: 100%;
+    background: transparent;
+    transition: background 0.2s ease;
+  }
+
+  .resize-handle:hover::after {
+    background: var(--primary-color, #1890ff);
   }
 </style>

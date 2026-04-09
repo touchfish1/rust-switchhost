@@ -9,7 +9,7 @@
   import Editor from './components/Editor.svelte'
   import ThemeToggle from './components/ThemeToggle.svelte'
   import Modal from './components/Modal.svelte'
-  import RemoteSyncModal from './components/RemoteSyncModal.svelte'
+  import CreateSchemeModal from './components/CreateSchemeModal.svelte'
   
   interface Scheme {
     id: string
@@ -57,9 +57,7 @@
   let showDeleteModal = false
   let showCurrentHostsModal = false
   let showUpdateModal = false
-  let showRemoteSyncModal = false
   let deleteTargetId: string | null = null
-  let newSchemeName = ''
   let currentHostsContent = ''
   let updateInfo: UpdateInfo | null = null
   let availableUpdate: Update | null = null
@@ -68,14 +66,17 @@
   let hasPendingUpdate = false
   let updateCheckTimer: ReturnType<typeof setInterval> | null = null
   let remoteSyncTimer: ReturnType<typeof setInterval> | null = null
-  let isSavingRemoteConfig = false
   let isSyncingRemoteScheme = false
+  let isCreatingScheme = false
+  let sidebarWidth = 320
   const syncingSchemeIds = new Set<string>()
   
   onMount(async () => {
     const savedTheme = localStorage.getItem('theme')
+    const savedSidebarWidth = localStorage.getItem('sidebar-width')
     isDarkMode = savedTheme === 'dark' || 
       (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    sidebarWidth = savedSidebarWidth ? Math.min(520, Math.max(280, Number(savedSidebarWidth) || 320)) : 320
     updateTheme()
 
     await Promise.all([
@@ -290,30 +291,73 @@
   }
   
   function openCreateModal() {
-    newSchemeName = ''
     showCreateModal = true
   }
   
   async function handleCreateConfirm(event: CustomEvent) {
-    const name = event.detail.value?.trim()
+    const name = event.detail.name?.trim()
+    const type = event.detail.type as 'local' | 'remote'
+    const remoteUrl = event.detail.remoteUrl?.trim() || ''
+    const autoSyncEnabled = Boolean(event.detail.autoSyncEnabled)
+    const syncIntervalInput = event.detail.syncIntervalMinutes as string
+    const syncIntervalMinutes = syncIntervalInput ? Number(syncIntervalInput) : null
+
     if (!name) return
+    if (type === 'remote' && !remoteUrl) {
+      error = '远程 URL 分组必须填写远程地址'
+      return
+    }
+    if (type === 'remote' && autoSyncEnabled && (!syncIntervalMinutes || syncIntervalMinutes <= 0)) {
+      error = '启用定时同步时，请填写大于 0 的同步间隔'
+      return
+    }
     
     try {
+      isCreatingScheme = true
       isLoading = true
       error = null
-      const newScheme = await invoke('create_scheme', {
+      let newScheme = await invoke<Scheme>('create_scheme', {
         name,
-        content: '# 新的 hosts 配置\n127.0.0.1 localhost\n'
+        content: type === 'remote'
+          ? '# 远程 URL 分组\n# 首次同步后会自动填充内容\n'
+          : '# 新的 hosts 配置\n127.0.0.1 localhost\n'
       })
-      
-      schemes = [...schemes, newScheme]
+
+      if (type === 'remote') {
+        newScheme = await invoke<Scheme>('update_scheme_remote_config', {
+          id: newScheme.id,
+          remoteUrl,
+          autoSyncEnabled,
+          syncIntervalMinutes
+        })
+      }
+
+      if (schemes.some((scheme) => scheme.id === newScheme.id)) {
+        schemes = schemes.map((scheme) => (scheme.id === newScheme.id ? newScheme : scheme))
+      } else {
+        schemes = [...schemes, newScheme]
+      }
+
       activeSchemeId = newScheme.id
       activeScheme = newScheme
       editorContent = newScheme.content
+      showCreateModal = false
+
+      if (type === 'remote') {
+        try {
+          const syncedScheme = await invoke<Scheme>('sync_remote_scheme', { id: newScheme.id })
+          applyUpdatedScheme(syncedScheme)
+          showSuccessToast('远程 URL 分组已创建并完成首次同步')
+        } catch (syncError) {
+          error = `远程分组已创建，但首次同步失败: ${syncError}`
+          console.error('Failed to sync new remote scheme:', syncError)
+        }
+      }
     } catch (e) {
       error = `创建分组失败: ${e}`
       console.error('Failed to create scheme:', e)
     } finally {
+      isCreatingScheme = false
       isLoading = false
     }
   }
@@ -412,44 +456,6 @@
       console.error('Failed to toggle scheme:', e)
     } finally {
       isLoading = false
-    }
-  }
-
-  function openRemoteSyncSettings() {
-    if (!activeScheme) return
-    showRemoteSyncModal = true
-  }
-
-  async function handleSaveRemoteSyncConfig(event: CustomEvent) {
-    if (!activeSchemeId) return
-
-    const remoteUrl = event.detail.remoteUrl as string
-    const autoSyncEnabled = event.detail.autoSyncEnabled as boolean
-    const syncIntervalInput = event.detail.syncIntervalMinutes as string
-    const syncIntervalMinutes = syncIntervalInput ? Number(syncIntervalInput) : null
-
-    if (autoSyncEnabled && (!syncIntervalMinutes || syncIntervalMinutes <= 0)) {
-      error = '启用自动同步时，请填写大于 0 的同步间隔'
-      return
-    }
-
-    try {
-      isSavingRemoteConfig = true
-      error = null
-      const updated = await invoke<Scheme>('update_scheme_remote_config', {
-        id: activeSchemeId,
-        remoteUrl: remoteUrl || null,
-        autoSyncEnabled,
-        syncIntervalMinutes
-      })
-      applyUpdatedScheme(updated)
-      showRemoteSyncModal = false
-      showSuccessToast('远程同步设置已保存')
-    } catch (e) {
-      error = `保存远程同步设置失败: ${e}`
-      console.error('Failed to save remote sync config:', e)
-    } finally {
-      isSavingRemoteConfig = false
     }
   }
 
@@ -584,6 +590,11 @@
       setTimeout(() => toast.remove(), 300)
     }, 2000)
   }
+
+  function handleSidebarResize(event: CustomEvent) {
+    sidebarWidth = event.detail.width
+    localStorage.setItem('sidebar-width', String(sidebarWidth))
+  }
 </script>
 
 <div class="app" class:dark={isDarkMode}>
@@ -630,6 +641,7 @@
     <Sidebar
       {schemes}
       {activeSchemeId}
+      width={sidebarWidth}
       on:select={(e) => handleSelectScheme(e.detail.id)}
       on:create={openCreateModal}
       on:import={handleImportSchemes}
@@ -637,6 +649,7 @@
       on:delete={(e) => openDeleteModal(e.detail.id)}
       on:rename={handleRename}
       on:toggle={handleToggleScheme}
+      on:resize={handleSidebarResize}
     />
     
     <div class="content">
@@ -657,9 +670,6 @@
             {/if}
           </div>
           <div class="editor-actions">
-            <button class="btn-secondary" on:click={openRemoteSyncSettings}>
-              远程同步设置
-            </button>
             {#if activeScheme.remote_url}
               <button class="btn-secondary" on:click={handleSyncActiveScheme} disabled={isSyncingRemoteScheme || isLoading}>
                 {isSyncingRemoteScheme ? '同步中...' : '立即同步'}
@@ -691,12 +701,10 @@
   {/if}
   
   {#if showCreateModal}
-    <Modal
-      title="创建新分组"
-      confirmText="创建"
-      inputValue={newSchemeName}
+    <CreateSchemeModal
+      isOpen={showCreateModal}
+      isSubmitting={isCreatingScheme}
       on:confirm={handleCreateConfirm}
-      on:cancel={() => showCreateModal = false}
       on:close={() => showCreateModal = false}
     />
   {/if}
@@ -844,22 +852,6 @@
     </div>
   {/if}
 
-  {#if showRemoteSyncModal && activeScheme}
-    <RemoteSyncModal
-      isOpen={showRemoteSyncModal}
-      schemeName={activeScheme.name}
-      remoteUrl={activeScheme.remote_url || ''}
-      autoSyncEnabled={activeScheme.auto_sync_enabled || false}
-      syncIntervalMinutes={activeScheme.sync_interval_minutes ? String(activeScheme.sync_interval_minutes) : ''}
-      lastSyncedAt={activeScheme.last_synced_at ? new Date(activeScheme.last_synced_at).toLocaleString() : ''}
-      lastSyncError={activeScheme.last_sync_error || ''}
-      isSaving={isSavingRemoteConfig}
-      isSyncing={isSyncingRemoteScheme}
-      on:save={handleSaveRemoteSyncConfig}
-      on:sync={handleSyncActiveScheme}
-      on:close={() => { showRemoteSyncModal = false }}
-    />
-  {/if}
 </div>
 
 <style>
