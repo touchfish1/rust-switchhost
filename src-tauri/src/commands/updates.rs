@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
 
 const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/touchfish1/rust-switchhost/releases/latest";
@@ -32,7 +33,7 @@ struct GithubAsset {
 }
 
 #[tauri::command]
-pub async fn check_for_updates() -> Result<UpdateInfo, String> {
+pub async fn check_for_updates(app: AppHandle) -> Result<UpdateInfo, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .user_agent("rust-switchhost-update-checker")
@@ -50,7 +51,7 @@ pub async fn check_for_updates() -> Result<UpdateInfo, String> {
         .await
         .map_err(|e| format!("Failed to parse latest release: {}", e))?;
 
-    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let current_version = app.package_info().version.to_string();
     let latest_version = normalize_version(&release.tag_name);
     let current_normalized = normalize_version(&current_version);
     let has_update = compare_versions(&latest_version, &current_normalized).is_gt();

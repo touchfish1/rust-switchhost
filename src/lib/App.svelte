@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { getVersion } from '@tauri-apps/api/app'
   import { invoke } from '@tauri-apps/api/core'
   import { open } from '@tauri-apps/plugin-shell'
   import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
@@ -35,6 +36,7 @@
   let isLoading = false
   let error: string | null = null
   let isDarkMode = false
+  let appVersion = ''
   
   let showCreateModal = false
   let showDeleteModal = false
@@ -53,9 +55,21 @@
     isDarkMode = savedTheme === 'dark' || 
       (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
     updateTheme()
-    
-    await loadSchemes()
+
+    await Promise.all([
+      loadAppVersion(),
+      loadSchemes()
+    ])
   })
+
+  async function loadAppVersion() {
+    try {
+      appVersion = await getVersion()
+    } catch (e) {
+      console.error('Failed to load app version:', e)
+      appVersion = ''
+    }
+  }
   
   function updateTheme() {
     if (isDarkMode) {
@@ -336,7 +350,12 @@
 
 <div class="app" class:dark={isDarkMode}>
   <div class="header">
-    <h1>🔧 Rust SwitchHost</h1>
+    <div class="header-brand">
+      <h1>🔧 Rust SwitchHost</h1>
+      {#if appVersion}
+        <span class="app-version">v{appVersion}</span>
+      {/if}
+    </div>
     <div class="header-actions">
       <button class="btn-secondary" on:click={handleCheckUpdates} disabled={isLoading}>
         检查更新
@@ -645,6 +664,27 @@
     font-size: 20px;
     font-weight: 600;
     color: var(--text-primary);
+  }
+
+  .header-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .app-version {
+    display: inline-flex;
+    align-items: center;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: var(--hover-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
   }
   
   .header-actions {

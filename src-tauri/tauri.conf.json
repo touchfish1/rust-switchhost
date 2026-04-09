@@ -1,6 +1,6 @@
 {
   "productName": "Rust SwitchHost",
-  "version": "0.0.4",
+  "version": "../package.json",
   "identifier": "com.rustswitchhost.app",
   "build": {
     "beforeDevCommand": "npm run dev",
