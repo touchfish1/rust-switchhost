@@ -58,6 +58,8 @@ npm run tauri build
 - 工作流文件：`.github/workflows/release.yml`
 - 触发方式：推送 `v*` 格式的 tag，例如 `v0.1.0`
 - 发布结果：自动构建 Windows / macOS / Linux 安装包，并上传到对应的 GitHub Release
+- 默认 Linux runner：GitHub-hosted `ubuntu-22.04`
+- 额外 Linux 发行版：支持通过 self-hosted runner 扩展，例如 Rocky Linux
 
 示例发布流程：
 
@@ -67,6 +69,18 @@ git push githost v0.1.0
 ```
 
 也可以在 GitHub Actions 页面手动触发 `Release` 工作流，并填写 `release_tag`。
+
+### Rocky Linux 等其他 Linux 发行版
+
+GitHub-hosted Linux runner 默认只有 Ubuntu，因此像 Rocky Linux、AlmaLinux 这类发行版，需要使用 self-hosted runner。
+
+当前工作流已经预留了 Rocky Linux 发布 job，启用方式如下：
+
+1. 准备一台 Rocky Linux 机器，并安装 GitHub Actions self-hosted runner
+2. 给该 runner 打上标签：`self-hosted`, `linux`, `x64`, `rockylinux`
+3. 在 GitHub 仓库变量中设置 `ENABLE_SELF_HOSTED_LINUX=true`
+
+启用后，发布流程会额外在 Rocky Linux runner 上构建并把产物上传到同一个 GitHub Release。
 
 ## 📁 项目结构
 

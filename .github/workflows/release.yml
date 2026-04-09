@@ -79,3 +79,44 @@ jobs:
           prerelease: false
           generateReleaseNotes: true
           args: ${{ matrix.args }}
+
+  publish-rocky-linux:
+    if: vars.ENABLE_SELF_HOSTED_LINUX == 'true'
+    permissions:
+      contents: write
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - rockylinux
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build app and publish Rocky Linux release assets
+        uses: tauri-apps/tauri-action@v0.6.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          releaseName: Rust SwitchHost ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          releaseBody: |
+            Automated release built by GitHub Actions.
+          releaseCommitish: ${{ github.sha }}
+          releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft == 'true' || false }}
+          prerelease: false
+          generateReleaseNotes: true
+          args: ''

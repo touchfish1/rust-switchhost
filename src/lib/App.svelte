@@ -25,8 +25,10 @@
   
   let showCreateModal = false
   let showDeleteModal = false
+  let showCurrentHostsModal = false
   let deleteTargetId: string | null = null
   let newSchemeName = ''
+  let currentHostsContent = ''
   
   onMount(async () => {
     const savedTheme = localStorage.getItem('theme')
@@ -73,6 +75,20 @@
     activeSchemeId = id
     activeScheme = schemes.find(s => s.id === id) || null
     editorContent = activeScheme?.content || ''
+  }
+
+  async function openCurrentHostsModal() {
+    try {
+      isLoading = true
+      error = null
+      currentHostsContent = await invoke('get_hosts_content')
+      showCurrentHostsModal = true
+    } catch (e) {
+      error = `读取当前 Hosts 失败: ${e}`
+      console.error('Failed to get current hosts content:', e)
+    } finally {
+      isLoading = false
+    }
   }
   
   function openCreateModal() {
@@ -222,6 +238,9 @@
   <div class="header">
     <h1>🔧 Rust SwitchHost</h1>
     <div class="header-actions">
+      <button class="btn-secondary" on:click={openCurrentHostsModal} disabled={isLoading}>
+        查看当前 Hosts
+      </button>
       <ThemeToggle isDark={isDarkMode} on:toggle={handleThemeToggle} />
     </div>
   </div>
@@ -299,6 +318,38 @@
       <p class="confirm-text">确定要删除分组「{schemes.find(s => s.id === deleteTargetId)?.name || ''}」吗？</p>
       <p class="confirm-warning">此操作不可撤销。</p>
     </Modal>
+  {/if}
+
+  {#if showCurrentHostsModal}
+    <div
+      class="hosts-modal-overlay"
+      on:click|self={() => showCurrentHostsModal = false}
+      on:keydown={(e) => e.key === 'Escape' && (showCurrentHostsModal = false)}
+      role="dialog"
+      aria-modal="true"
+      aria-label="当前 Hosts 文件"
+      tabindex="0"
+    >
+      <div class="hosts-modal" role="document">
+        <div class="hosts-modal-header">
+          <div>
+            <h3>当前 Hosts 文件</h3>
+            <p>这里显示的是系统当前实际 hosts 内容</p>
+          </div>
+          <button
+            class="hosts-close-btn"
+            on:click={() => showCurrentHostsModal = false}
+            aria-label="关闭"
+          >
+            ×
+          </button>
+        </div>
+
+        <div class="hosts-modal-body">
+          <Editor content={currentHostsContent} readOnly={true} />
+        </div>
+      </div>
+    </div>
   {/if}
 </div>
 
@@ -423,6 +474,29 @@
     opacity: 0.6;
     cursor: not-allowed;
   }
+
+  .btn-secondary {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: var(--hover-bg);
+  }
+
+  .btn-secondary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
   
   .error-banner {
     padding: 12px 24px;
@@ -542,5 +616,71 @@
     margin: 0;
     font-size: 13px;
     color: var(--danger-color, #ff4d4f);
+  }
+
+  .hosts-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2100;
+    padding: 24px;
+  }
+
+  .hosts-modal {
+    width: min(1100px, 100%);
+    height: min(760px, calc(100vh - 48px));
+    background: var(--editor-bg);
+    border-radius: 12px;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .hosts-modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .hosts-modal-header h3 {
+    margin: 0 0 4px 0;
+    font-size: 18px;
+    color: var(--text-primary);
+  }
+
+  .hosts-modal-header p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .hosts-close-btn {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .hosts-close-btn:hover {
+    background: var(--hover-bg);
+    color: var(--text-primary);
+  }
+
+  .hosts-modal-body {
+    flex: 1;
+    min-height: 0;
   }
 </style>
