@@ -46,8 +46,15 @@
 <svelte:window on:keydown={handleKeydown} />
 
 {#if showModal}
-  <div class="modal-overlay" on:click={handleCancel} role="dialog" aria-modal="true">
-    <div class="modal-container" class:danger={type === 'danger'} on:click|stopPropagation role="document">
+  <div
+    class="modal-overlay"
+    on:click|self={handleCancel}
+    on:keydown={(e) => e.key === 'Escape' && handleCancel()}
+    role="dialog"
+    aria-modal="true"
+    tabindex="0"
+  >
+    <div class="modal-container" class:danger={type === 'danger'} role="document">
       <div class="modal-header">
         <h3>{title}</h3>
         <button class="close-btn" on:click={handleCancel} aria-label="关闭">×</button>

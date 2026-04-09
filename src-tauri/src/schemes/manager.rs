@@ -1,6 +1,8 @@
 use super::{Scheme, SchemeConfig, SyncLogEntry};
 use crate::hosts;
-use chrono::Utc;
+use crate::validation::validate_hosts_content;
+use chrono::{DateTime, Duration, Utc};
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -8,21 +10,20 @@ use std::path::PathBuf;
 pub struct SchemeManager {
     config: SchemeConfig,
     config_path: PathBuf,
+    sync_log_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct DueSyncJob {
+    pub id: String,
+    pub trigger: String,
 }
 
 impl SchemeManager {
     const MAX_SYNC_LOGS: usize = 50;
 
     pub fn new() -> io::Result<Self> {
-        let config_dir = match dirs::config_dir() {
-            Some(dir) => dir.join("rust-switchhost"),
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "Failed to get config directory",
-                ))
-            }
-        };
+        let config_dir = Self::get_config_dir()?;
 
         if !config_dir.exists() {
             if let Err(e) = fs::create_dir_all(&config_dir) {
@@ -33,11 +34,13 @@ impl SchemeManager {
                 return Ok(Self {
                     config: SchemeConfig::default(),
                     config_path: config_dir.join("schemes.json"),
+                    sync_log_path: config_dir.join("sync-logs.json"),
                 });
             }
         }
 
         let config_path = config_dir.join("schemes.json");
+        let sync_log_path = config_dir.join("sync-logs.json");
 
         let config = if config_path.exists() {
             match fs::read_to_string(&config_path) {
@@ -57,8 +60,11 @@ impl SchemeManager {
         let mut manager = Self {
             config,
             config_path,
+            sync_log_path,
         };
+        manager.migrate_embedded_logs_to_store();
         manager.migrate_legacy_platform_state();
+        manager.reset_sync_runtime_state();
         Ok(manager)
     }
 
@@ -76,6 +82,55 @@ impl SchemeManager {
                 scheme
             })
             .collect())
+    }
+
+    pub fn get_scheme_sync_logs(&self, id: &str) -> io::Result<Vec<SyncLogEntry>> {
+        Ok(Self::load_sync_logs_from(&self.sync_log_path)?
+            .remove(id)
+            .unwrap_or_default())
+    }
+
+    pub fn get_due_sync_jobs(&self) -> Vec<DueSyncJob> {
+        let now = Utc::now();
+
+        self.config
+            .schemes
+            .iter()
+            .filter_map(|scheme| {
+                let remote_url = scheme.remote_url.as_ref()?.trim();
+                let interval = scheme.sync_interval_minutes?;
+                if !scheme.auto_sync_enabled || remote_url.is_empty() || interval == 0 {
+                    return None;
+                }
+
+                if scheme.sync_status == "syncing" {
+                    return None;
+                }
+
+                if let Some(next_retry_at) = scheme.next_retry_at {
+                    if next_retry_at <= now {
+                        return Some(DueSyncJob {
+                            id: scheme.id.clone(),
+                            trigger: "retry".to_string(),
+                        });
+                    }
+                }
+
+                let last_synced_at = scheme
+                    .last_synced_at
+                    .unwrap_or_else(|| DateTime::<Utc>::from(std::time::SystemTime::UNIX_EPOCH));
+
+                let due_at = last_synced_at + Duration::minutes(interval as i64);
+                if due_at <= now {
+                    return Some(DueSyncJob {
+                        id: scheme.id.clone(),
+                        trigger: "scheduled".to_string(),
+                    });
+                }
+
+                None
+            })
+            .collect()
     }
 
     pub fn create_scheme(&mut self, name: String, content: String) -> io::Result<Scheme> {
@@ -216,8 +271,36 @@ impl SchemeManager {
                 scheme.auto_sync_enabled = false;
                 scheme.sync_interval_minutes = None;
                 scheme.last_sync_error = None;
+                scheme.sync_status = "idle".to_string();
+                scheme.last_sync_message = None;
+                scheme.next_retry_at = None;
+                scheme.consecutive_failures = 0;
             }
 
+            scheme.updated_at = Utc::now();
+            let updated = scheme.clone();
+            self.save_config()?;
+            Ok(updated)
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotFound, "Scheme not found"))
+        }
+    }
+
+    pub fn mark_remote_sync_started(&mut self, id: &str, trigger: &str) -> io::Result<Scheme> {
+        if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
+            if scheme.sync_status == "syncing" {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "当前分组正在同步中",
+                ));
+            }
+
+            scheme.sync_status = "syncing".to_string();
+            scheme.last_sync_message = Some(match trigger {
+                "scheduled" => "后台定时同步中".to_string(),
+                "retry" => "后台重试同步中".to_string(),
+                _ => "手动同步中".to_string(),
+            });
             scheme.updated_at = Utc::now();
             let updated = scheme.clone();
             self.save_config()?;
@@ -242,15 +325,19 @@ impl SchemeManager {
             scheme.content = content;
             scheme.last_synced_at = Some(Utc::now());
             scheme.last_sync_error = None;
+            scheme.sync_status = "success".to_string();
+            scheme.last_sync_message = Some(if is_enabled {
+                "远程同步成功，已自动应用到当前系统 Hosts".to_string()
+            } else {
+                "远程同步成功".to_string()
+            });
+            scheme.next_retry_at = None;
+            scheme.consecutive_failures = 0;
             Self::push_sync_log(
                 scheme,
                 "success",
                 trigger,
-                if is_enabled {
-                    "远程同步成功，已自动应用到当前系统 Hosts".to_string()
-                } else {
-                    "远程同步成功".to_string()
-                },
+                scheme.last_sync_message.clone().unwrap_or_else(|| "远程同步成功".to_string()),
             );
             scheme.updated_at = Utc::now();
         } else {
@@ -262,6 +349,9 @@ impl SchemeManager {
         }
 
         self.sync_enabled_flags();
+        if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
+            Self::flush_scheme_logs_at(&self.sync_log_path, scheme)?;
+        }
         self.save_config()?;
         self.get_scheme(id)
     }
@@ -274,9 +364,18 @@ impl SchemeManager {
     ) -> io::Result<Scheme> {
         if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
             scheme.last_sync_error = Some(error_message);
+            scheme.sync_status = "error".to_string();
+            scheme.last_sync_message = scheme.last_sync_error.clone();
+            scheme.consecutive_failures = scheme.consecutive_failures.saturating_add(1);
+            scheme.next_retry_at = if scheme.auto_sync_enabled {
+                Some(Utc::now() + Duration::minutes(Self::retry_delay_minutes(scheme.consecutive_failures)))
+            } else {
+                None
+            };
             let message = scheme.last_sync_error.clone().unwrap_or_else(|| "未知同步错误".to_string());
             Self::push_sync_log(scheme, "error", trigger, message);
             scheme.updated_at = Utc::now();
+            Self::flush_scheme_logs_at(&self.sync_log_path, scheme)?;
             self.save_config()?;
             self.get_scheme(id)
         } else {
@@ -312,7 +411,12 @@ impl SchemeManager {
     }
 
     fn save_config(&self) -> io::Result<()> {
-        let content = serde_json::to_string_pretty(&self.config)?;
+        let mut config_to_save = self.config.clone();
+        for scheme in &mut config_to_save.schemes {
+            scheme.sync_logs.clear();
+        }
+
+        let content = serde_json::to_string_pretty(&config_to_save)?;
         match fs::write(&self.config_path, &content) {
             Ok(_) => Ok(()),
             Err(e) => {
@@ -320,6 +424,25 @@ impl SchemeManager {
                 Ok(())
             }
         }
+    }
+
+    fn load_sync_logs_from(path: &PathBuf) -> io::Result<HashMap<String, Vec<SyncLogEntry>>> {
+        if !path.exists() {
+            return Ok(HashMap::new());
+        }
+
+        let content = fs::read_to_string(path)?;
+        serde_json::from_str(&content).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Failed to parse sync log file: {}", error),
+            )
+        })
+    }
+
+    fn save_sync_logs_to(path: &PathBuf, logs: &HashMap<String, Vec<SyncLogEntry>>) -> io::Result<()> {
+        let content = serde_json::to_string_pretty(logs)?;
+        fs::write(path, content)
     }
 
     fn current_platform() -> String {
@@ -378,6 +501,8 @@ impl SchemeManager {
         }
 
         let merged = merged_contents.join("\n\n");
+        validate_hosts_content(&merged)
+            .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
         hosts::write_hosts_file(&merged)
     }
 
@@ -416,10 +541,87 @@ impl SchemeManager {
             scheme.sync_logs.truncate(Self::MAX_SYNC_LOGS);
         }
     }
+
+    fn flush_scheme_logs_at(path: &PathBuf, scheme: &mut Scheme) -> io::Result<()> {
+        if scheme.sync_logs.is_empty() {
+            return Ok(());
+        }
+
+        let mut logs = Self::load_sync_logs_from(path)?;
+        let entries = logs.entry(scheme.id.clone()).or_default();
+        for log in scheme.sync_logs.drain(..) {
+            entries.insert(0, log);
+        }
+
+        if entries.len() > Self::MAX_SYNC_LOGS {
+            entries.truncate(Self::MAX_SYNC_LOGS);
+        }
+
+        Self::save_sync_logs_to(path, &logs)
+    }
+
+    fn migrate_embedded_logs_to_store(&mut self) {
+        let mut changed = false;
+
+        for index in 0..self.config.schemes.len() {
+            if !self.config.schemes[index].sync_logs.is_empty() {
+                let _ = Self::flush_scheme_logs_at(&self.sync_log_path, &mut self.config.schemes[index]);
+                changed = true;
+            }
+        }
+
+        if changed {
+            let _ = self.save_config();
+        }
+    }
+
+    fn reset_sync_runtime_state(&mut self) {
+        for scheme in &mut self.config.schemes {
+            if scheme.sync_status == "syncing" {
+                scheme.sync_status = "idle".to_string();
+                scheme.last_sync_message = Some("应用重新启动，已重置同步状态".to_string());
+            }
+        }
+
+        let _ = self.save_config();
+    }
+
+    fn retry_delay_minutes(consecutive_failures: u32) -> i64 {
+        match consecutive_failures {
+            0 | 1 => 1,
+            2 => 2,
+            3 => 5,
+            _ => 10,
+        }
+    }
+
+    fn get_config_dir() -> io::Result<PathBuf> {
+        match dirs::config_dir() {
+            Some(dir) => Ok(dir.join("rust-switchhost")),
+            None => Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Failed to get config directory",
+            )),
+        }
+    }
 }
 
 impl Default for SchemeManager {
     fn default() -> Self {
         Self::new().expect("Failed to create SchemeManager")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SchemeManager;
+
+    #[test]
+    fn calculates_retry_delay_with_backoff() {
+        assert_eq!(SchemeManager::retry_delay_minutes(0), 1);
+        assert_eq!(SchemeManager::retry_delay_minutes(1), 1);
+        assert_eq!(SchemeManager::retry_delay_minutes(2), 2);
+        assert_eq!(SchemeManager::retry_delay_minutes(3), 5);
+        assert_eq!(SchemeManager::retry_delay_minutes(8), 10);
     }
 }

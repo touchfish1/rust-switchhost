@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte'
   import { getVersion } from '@tauri-apps/api/app'
   import { invoke } from '@tauri-apps/api/core'
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event'
   import { open as openDialog, save } from '@tauri-apps/plugin-dialog'
   import { open } from '@tauri-apps/plugin-shell'
   import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
@@ -21,12 +22,10 @@
     sync_interval_minutes?: number | null
     last_synced_at?: string | null
     last_sync_error?: string | null
-    sync_logs?: Array<{
-      timestamp: string
-      status: string
-      trigger: string
-      message: string
-    }>
+    sync_status?: string
+    last_sync_message?: string | null
+    next_retry_at?: string | null
+    consecutive_failures?: number
     enabled: boolean
     created_at: string
     updated_at: string
@@ -75,10 +74,11 @@
   let updateProgressText = ''
   let hasPendingUpdate = false
   let updateCheckTimer: ReturnType<typeof setInterval> | null = null
-  let remoteSyncTimer: ReturnType<typeof setInterval> | null = null
   let isSyncingRemoteScheme = false
   let isCreatingScheme = false
   let sidebarWidth = 320
+  let syncLogs: Array<{ timestamp: string; status: string; trigger: string; message: string }> = []
+  let syncEventUnlisten: UnlistenFn | null = null
   const syncingSchemeIds = new Set<string>()
   
   onMount(async () => {
@@ -99,10 +99,12 @@
     updateCheckTimer = setInterval(() => {
       void checkForUpdatesSilently()
     }, 15 * 60 * 1000)
-
-    remoteSyncTimer = setInterval(() => {
-      void runScheduledRemoteSync()
-    }, 60 * 1000)
+    syncEventUnlisten = await listen('schemes-changed', async () => {
+      await loadSchemes()
+      if (showSyncLogModal && activeSchemeId) {
+        await loadSyncLogs(activeSchemeId)
+      }
+    })
   })
 
   onDestroy(() => {
@@ -111,9 +113,9 @@
       updateCheckTimer = null
     }
 
-    if (remoteSyncTimer) {
-      clearInterval(remoteSyncTimer)
-      remoteSyncTimer = null
+    if (syncEventUnlisten) {
+      syncEventUnlisten()
+      syncEventUnlisten = null
     }
   })
 
@@ -144,12 +146,23 @@
     try {
       isLoading = true
       error = null
-      schemes = await invoke('get_all_schemes')
-      if (schemes.length > 0 && !activeSchemeId) {
-        activeSchemeId = schemes[0].id
-        activeScheme = schemes[0]
-        editorContent = activeScheme.content
+      const loadedSchemes = await invoke<Scheme[]>('get_all_schemes')
+      schemes = loadedSchemes
+
+      if (loadedSchemes.length === 0) {
+        activeSchemeId = null
+        activeScheme = null
+        editorContent = ''
+        return
       }
+
+      const preservedActiveId = activeSchemeId && loadedSchemes.some((scheme) => scheme.id === activeSchemeId)
+        ? activeSchemeId
+        : loadedSchemes[0].id
+
+      activeSchemeId = preservedActiveId
+      activeScheme = loadedSchemes.find((scheme) => scheme.id === preservedActiveId) || loadedSchemes[0]
+      editorContent = activeScheme?.content || ''
     } catch (e) {
       error = `加载分组失败: ${e}`
       console.error('Failed to load schemes:', e)
@@ -390,7 +403,7 @@
 
       if (type === 'remote') {
         try {
-          const syncedScheme = await invoke<Scheme>('sync_remote_scheme', { id: newScheme.id })
+          const syncedScheme = await invoke<Scheme>('sync_remote_scheme', { id: newScheme.id, trigger: 'manual' })
           applyUpdatedScheme(syncedScheme)
           showSuccessToast('远程 URL 分组已创建并完成首次同步')
         } catch (syncError) {
@@ -546,25 +559,16 @@
 
   function openSyncLogModal() {
     if (!activeScheme?.remote_url) return
+    void loadSyncLogs(activeScheme.id)
     showSyncLogModal = true
   }
 
-  async function runScheduledRemoteSync() {
-    const now = Date.now()
-
-    for (const scheme of schemes) {
-      const remoteUrl = scheme.remote_url?.trim()
-      const interval = scheme.sync_interval_minutes
-      if (!scheme.auto_sync_enabled || !remoteUrl || !interval || interval <= 0) {
-        continue
-      }
-
-      const lastSyncedAt = scheme.last_synced_at ? new Date(scheme.last_synced_at).getTime() : 0
-      const due = lastSyncedAt === 0 || now - lastSyncedAt >= interval * 60 * 1000
-
-      if (due) {
-        await syncSchemeById(scheme.id, true)
-      }
+  async function loadSyncLogs(id: string) {
+    try {
+      syncLogs = await invoke('get_scheme_sync_logs', { id })
+    } catch (e) {
+      console.error('Failed to load sync logs:', e)
+      syncLogs = []
     }
   }
 
@@ -648,6 +652,19 @@
     sidebarWidth = event.detail.width
     localStorage.setItem('sidebar-width', String(sidebarWidth))
   }
+
+  function formatSyncStatus(status?: string) {
+    switch (status) {
+      case 'syncing':
+        return '同步中'
+      case 'success':
+        return '同步成功'
+      case 'error':
+        return '同步失败'
+      default:
+        return '待同步'
+    }
+  }
 </script>
 
 <div class="app" class:dark={isDarkMode}>
@@ -721,6 +738,19 @@
                   · 每 {activeScheme.sync_interval_minutes} 分钟同步
                 {/if}
               </span>
+              <div class="sync-status-row">
+                <span class={`sync-badge ${activeScheme.sync_status || 'idle'}`}>
+                  {formatSyncStatus(activeScheme.sync_status)}
+                </span>
+                {#if activeScheme.last_sync_message}
+                  <span class="sync-message">{activeScheme.last_sync_message}</span>
+                {/if}
+                {#if activeScheme.next_retry_at && activeScheme.sync_status === 'error'}
+                  <span class="sync-next-retry">
+                    下次重试：{new Date(activeScheme.next_retry_at).toLocaleString()}
+                  </span>
+                {/if}
+              </div>
             {/if}
           </div>
           <div class="editor-actions">
@@ -728,6 +758,11 @@
               <button class="btn-secondary" on:click={openSyncLogModal} disabled={isLoading}>
                 同步日志
               </button>
+              {#if activeScheme.sync_status === 'error'}
+                <button class="btn-secondary" on:click={handleSyncActiveScheme} disabled={isSyncingRemoteScheme || isLoading}>
+                  重试同步
+                </button>
+              {/if}
               <button class="btn-secondary" on:click={handleSyncActiveScheme} disabled={isSyncingRemoteScheme || isLoading}>
                 {isSyncingRemoteScheme ? '同步中...' : '立即同步'}
               </button>
@@ -923,7 +958,7 @@
     <SyncLogModal
       isOpen={showSyncLogModal}
       schemeName={activeScheme.name}
-      logs={activeScheme.sync_logs || []}
+      logs={syncLogs}
       onClose={() => { showSyncLogModal = false }}
     />
   {/if}
@@ -1214,6 +1249,53 @@
   .remote-meta {
     font-size: 12px;
     color: var(--primary-color);
+  }
+
+  .sync-status-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .sync-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid var(--border-color);
+  }
+
+  .sync-badge.idle {
+    color: var(--text-secondary);
+    background: var(--hover-bg);
+  }
+
+  .sync-badge.syncing {
+    color: #1677ff;
+    background: rgba(22, 119, 255, 0.12);
+    border-color: rgba(22, 119, 255, 0.3);
+  }
+
+  .sync-badge.success {
+    color: #389e0d;
+    background: rgba(82, 196, 26, 0.12);
+    border-color: rgba(82, 196, 26, 0.3);
+  }
+
+  .sync-badge.error {
+    color: #cf1322;
+    background: rgba(255, 77, 79, 0.12);
+    border-color: rgba(255, 77, 79, 0.3);
+  }
+
+  .sync-message,
+  .sync-next-retry {
+    font-size: 12px;
+    color: var(--text-secondary);
   }
   
   .empty-state {

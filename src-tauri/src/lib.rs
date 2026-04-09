@@ -2,11 +2,12 @@ mod commands;
 mod hosts;
 mod schemes;
 mod tray;
+mod validation;
 
 use commands::schemes::AppState;
 use schemes::SchemeManager;
 use std::sync::Mutex;
-use tauri::{Manager, WindowEvent};
+use tauri::{AppHandle, Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -27,6 +28,7 @@ pub fn run() {
             }
 
             tray::setup_tray(&app.handle())?;
+            start_background_sync(app.handle().clone());
 
             Ok(())
         })
@@ -51,10 +53,32 @@ pub fn run() {
             commands::schemes::export_schemes,
             commands::schemes::import_schemes,
             commands::schemes::update_scheme_remote_config,
+            commands::schemes::get_scheme_sync_logs,
             commands::schemes::sync_remote_scheme,
             commands::schemes::fetch_remote_hosts,
             commands::updates::check_for_updates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn start_background_sync(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let due_jobs = {
+                let state = app.state::<AppState>();
+                let jobs = match state.scheme_manager.lock() {
+                    Ok(manager) => manager.get_due_sync_jobs(),
+                    Err(_) => Vec::new(),
+                };
+                jobs
+            };
+
+            for job in due_jobs {
+                let _ = commands::schemes::perform_remote_sync(&app, job.id, job.trigger).await;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
 }

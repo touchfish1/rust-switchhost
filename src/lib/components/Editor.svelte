@@ -38,7 +38,7 @@
       })
     }
     
-    return ipv6Regex.test(ip) || ip === '::1' || ip === 'localhost'
+    return ipv6Regex.test(ip) || ip === '::1'
   }
 
   function isValidHostname(hostname: string): boolean {

@@ -32,6 +32,14 @@ pub struct Scheme {
     #[serde(default)]
     pub sync_logs: Vec<SyncLogEntry>,
     #[serde(default)]
+    pub sync_status: String,
+    #[serde(default)]
+    pub last_sync_message: Option<String>,
+    #[serde(default)]
+    pub next_retry_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub consecutive_failures: u32,
+    #[serde(default)]
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -50,6 +58,10 @@ impl Scheme {
             last_synced_at: None,
             last_sync_error: None,
             sync_logs: Vec::new(),
+            sync_status: "idle".to_string(),
+            last_sync_message: None,
+            next_retry_at: None,
+            consecutive_failures: 0,
             enabled: false,
             created_at: now,
             updated_at: now,

@@ -1,4 +1,5 @@
 use crate::hosts;
+use crate::validation::validate_hosts_content;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -16,6 +17,7 @@ pub fn get_hosts_content() -> Result<String, String> {
 
 #[tauri::command]
 pub fn write_hosts_content(content: String) -> Result<(), String> {
+    validate_hosts_content(&content)?;
     hosts::write_hosts_file(&content).map_err(|e| e.to_string())
 }
 
