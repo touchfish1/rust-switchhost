@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import { getVersion } from '@tauri-apps/api/app'
   import { invoke } from '@tauri-apps/api/core'
   import { open } from '@tauri-apps/plugin-shell'
@@ -49,6 +49,8 @@
   let availableUpdate: Update | null = null
   let isInstallingUpdate = false
   let updateProgressText = ''
+  let hasPendingUpdate = false
+  let updateCheckTimer: ReturnType<typeof setInterval> | null = null
   
   onMount(async () => {
     const savedTheme = localStorage.getItem('theme')
@@ -60,6 +62,18 @@
       loadAppVersion(),
       loadSchemes()
     ])
+
+    await checkForUpdatesSilently()
+    updateCheckTimer = setInterval(() => {
+      void checkForUpdatesSilently()
+    }, 15 * 60 * 1000)
+  })
+
+  onDestroy(() => {
+    if (updateCheckTimer) {
+      clearInterval(updateCheckTimer)
+      updateCheckTimer = null
+    }
   })
 
   async function loadAppVersion() {
@@ -123,10 +137,15 @@
     }
   }
 
-  async function handleCheckUpdates() {
+  async function performUpdateCheck(options: { silent: boolean }) {
+    const { silent } = options
+
     try {
-      isLoading = true
-      error = null
+      if (!silent) {
+        isLoading = true
+        error = null
+      }
+
       const [releaseInfo, updaterUpdate] = await Promise.all([
         invoke<UpdateInfo>('check_for_updates'),
         check()
@@ -134,17 +153,33 @@
 
       updateInfo = releaseInfo
       availableUpdate = updaterUpdate
-      showUpdateModal = true
+      hasPendingUpdate = !!(releaseInfo.has_update || updaterUpdate)
 
-      if (updateInfo && !updateInfo.has_update) {
+      if (!silent) {
+        showUpdateModal = true
+      }
+
+      if (!silent && updateInfo && !updateInfo.has_update) {
         showSuccessToast(`当前已是最新版本 ${updateInfo.current_version}`)
       }
     } catch (e) {
-      error = `检查更新失败: ${e}`
-      console.error('Failed to check for updates:', e)
+      if (!silent) {
+        error = `检查更新失败: ${e}`
+      }
+      console.error(`Failed to ${silent ? 'silently c' : 'c'}heck for updates:`, e)
     } finally {
-      isLoading = false
+      if (!silent) {
+        isLoading = false
+      }
     }
+  }
+
+  async function checkForUpdatesSilently() {
+    await performUpdateCheck({ silent: true })
+  }
+
+  async function handleCheckUpdates() {
+    await performUpdateCheck({ silent: false })
   }
 
   async function handleInstallUpdate() {
@@ -176,6 +211,7 @@
       })
 
       updateProgressText = '安装完成，应用即将重启...'
+      hasPendingUpdate = false
       await invoke('restart_app')
     } catch (e) {
       error = `安装更新失败: ${e}`
@@ -357,7 +393,12 @@
       {/if}
     </div>
     <div class="header-actions">
-      <button class="btn-secondary" on:click={handleCheckUpdates} disabled={isLoading}>
+      <button
+        class="btn-secondary update-trigger"
+        class:has-notification={hasPendingUpdate}
+        on:click={handleCheckUpdates}
+        disabled={isLoading}
+      >
         检查更新
       </button>
       <button class="btn-secondary" on:click={openCurrentHostsModal} disabled={isLoading}>
@@ -735,6 +776,22 @@
   .btn-secondary:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  .update-trigger {
+    position: relative;
+  }
+
+  .update-trigger.has-notification::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #ff4d4f;
+    box-shadow: 0 0 0 2px var(--editor-bg);
   }
   
   .error-banner {
