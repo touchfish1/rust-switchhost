@@ -39,6 +39,10 @@
       editInput?.select()
     }, 0)
   }
+
+  function startEditByDoubleClick(id: string, name: string, event: MouseEvent) {
+    startEdit(id, name, event)
+  }
   
   function saveEdit(id: string) {
     const trimmedName = editingName.trim()
@@ -85,7 +89,7 @@
   <div class="sidebar-header">
     <div class="header-copy">
       <h2>分组列表</h2>
-      <span class="header-subtitle">可同时启用多个分组</span>
+      <span class="header-subtitle">勾选后立即生效，可同时启用多个分组</span>
     </div>
     <button 
       class="btn-new" 
@@ -114,6 +118,7 @@
           class:active={scheme.id === activeSchemeId}
           class:editing={editingId === scheme.id}
           on:click={() => selectScheme(scheme.id)}
+          on:dblclick={(e) => startEditByDoubleClick(scheme.id, scheme.name, e)}
           on:keydown={(e) => e.key === 'Enter' && selectScheme(scheme.id)}
           role="button"
           tabindex="0"
@@ -130,7 +135,7 @@
                 on:click|stopPropagation
               />
             {:else}
-              <span class="scheme-name">{scheme.name}</span>
+              <span class="scheme-name" title="双击编辑名称">{scheme.name}</span>
               <span class="scheme-date">
                 {new Date(scheme.updated_at).toLocaleDateString()}
               </span>
@@ -154,10 +159,9 @@
                 title="编辑名称"
                 aria-label="编辑名称"
               >
-                <svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor">
-                  <path d="M257.7 752c2.2 0 4-0.5 5.9-1.6l152.8-87.7c2.9-1.7 5-4.4 5.7-7.6l21.8-97c0.7-3.2 0-6.5-1.9-9.2l-53.7-74.6c-1.9-2.6-4.9-4.2-8.1-4.5l-99.2-9.4c-3.3-0.3-6.5 0.8-8.9 3l-72.4 62.3c-2.4 2.1-3.8 5.2-3.7 8.4l2.4 105.8c0.1 3.3 1.6 6.3 4.2 8.3l71.7 57.2c2.1 1.7 4.7 2.6 7.4 2.6z m4.6-23.6L204.9 680l-2.1-92.9 63.5-54.7 86.6 8.2 46.9 65.1-19 84.4-118.3 67.9z"/>
-                  <path d="M880 836H144c-17.7 0-32 14.3-32 32v0c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v0c0-17.7-14.3-32-32-32z"/>
-                  <path d="M878.3 254.4l-54.7-54.7c-12.5-12.5-32.8-12.5-45.3 0L383.2 594.9l100 100 395.1-395.1c12.5-12.5 12.5-32.8 0-45.4z m-45.3 5.3L448.2 644.5l-50-50 384.8-384.8 50 50z"/>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 20h9"/>
+                  <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/>
                 </svg>
               </button>
               
@@ -167,9 +171,12 @@
                 title="删除分组"
                 aria-label="删除分组"
               >
-                <svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor">
-                  <path d="M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0 4.4 3.6 8 8 8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72z"/>
-                  <path d="M864 256H160c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h60.4l24.7 523c1.6 34.1 29.8 61 63.9 61h454c34.2 0 62.3-26.8 63.9-61l24.7-523H888c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32z m-528 432c-17.7 0-32-14.3-32-32V416c0-17.7 14.3-32 32-32s32 14.3 32 32v240c0 17.7-14.3 32-32 32z m176 0c-17.7 0-32-14.3-32-32V416c0-17.7 14.3-32 32-32s32 14.3 32 32v240c0 17.7-14.3 32-32 32z m176 0c-17.7 0-32-14.3-32-32V416c0-17.7 14.3-32 32-32s32 14.3 32 32v240c0 17.7-14.3 32-32 32z"/>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 6h18"/>
+                  <path d="M8 6V4h8v2"/>
+                  <path d="M19 6l-1 14H6L5 6"/>
+                  <path d="M10 11v6"/>
+                  <path d="M14 11v6"/>
                 </svg>
               </button>
             {/if}
@@ -181,8 +188,8 @@
   
   <div class="sidebar-footer">
     <div class="hint">
-      <span class="hint-text">Ctrl+N 新建分组 | 双击编辑名称</span>
-      <span class="hint-text">勾选后可与其他分组一起应用</span>
+      <span class="hint-text">Ctrl+N 新建分组 | 双击名称可重命名</span>
+      <span class="hint-text">勾选后立即生效，并可同时启用多个分组</span>
     </div>
   </div>
 </div>
@@ -344,6 +351,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    cursor: text;
   }
   
   .scheme-date {
