@@ -97,7 +97,7 @@ jobs:
       - self-hosted
       - linux
       - x64
-      - rockylinux
+      - rocky-linux
 
     steps:
       - name: Checkout repository
