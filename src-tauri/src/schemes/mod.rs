@@ -7,6 +7,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncLogEntry {
+    pub timestamp: DateTime<Utc>,
+    pub status: String,
+    pub trigger: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scheme {
     pub id: String,
     pub name: String,
@@ -21,6 +29,8 @@ pub struct Scheme {
     pub last_synced_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub last_sync_error: Option<String>,
+    #[serde(default)]
+    pub sync_logs: Vec<SyncLogEntry>,
     #[serde(default)]
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
@@ -39,6 +49,7 @@ impl Scheme {
             sync_interval_minutes: None,
             last_synced_at: None,
             last_sync_error: None,
+            sync_logs: Vec::new(),
             enabled: false,
             created_at: now,
             updated_at: now,

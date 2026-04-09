@@ -10,6 +10,7 @@
   import ThemeToggle from './components/ThemeToggle.svelte'
   import Modal from './components/Modal.svelte'
   import CreateSchemeModal from './components/CreateSchemeModal.svelte'
+  import SyncLogModal from './components/SyncLogModal.svelte'
   
   interface Scheme {
     id: string
@@ -20,6 +21,12 @@
     sync_interval_minutes?: number | null
     last_synced_at?: string | null
     last_sync_error?: string | null
+    sync_logs?: Array<{
+      timestamp: string
+      status: string
+      trigger: string
+      message: string
+    }>
     enabled: boolean
     created_at: string
     updated_at: string
@@ -57,6 +64,7 @@
   let showDeleteModal = false
   let showCurrentHostsModal = false
   let showUpdateModal = false
+  let showSyncLogModal = false
   let createModalMode: 'create' | 'edit-remote' = 'create'
   let remoteEditTarget: Scheme | null = null
   let deleteTargetId: string | null = null
@@ -507,7 +515,10 @@
         error = null
       }
 
-      const updated = await invoke<Scheme>('sync_remote_scheme', { id })
+      const updated = await invoke<Scheme>('sync_remote_scheme', {
+        id,
+        trigger: silent ? 'scheduled' : 'manual'
+      })
       applyUpdatedScheme(updated)
 
       if (!silent) {
@@ -531,6 +542,11 @@
   async function handleSyncActiveScheme() {
     if (!activeSchemeId) return
     await syncSchemeById(activeSchemeId, false)
+  }
+
+  function openSyncLogModal() {
+    if (!activeScheme?.remote_url) return
+    showSyncLogModal = true
   }
 
   async function runScheduledRemoteSync() {
@@ -709,6 +725,9 @@
           </div>
           <div class="editor-actions">
             {#if activeScheme.remote_url}
+              <button class="btn-secondary" on:click={openSyncLogModal} disabled={isLoading}>
+                同步日志
+              </button>
               <button class="btn-secondary" on:click={handleSyncActiveScheme} disabled={isSyncingRemoteScheme || isLoading}>
                 {isSyncingRemoteScheme ? '同步中...' : '立即同步'}
               </button>
@@ -898,6 +917,15 @@
         </div>
       </div>
     </div>
+  {/if}
+
+  {#if showSyncLogModal && activeScheme}
+    <SyncLogModal
+      isOpen={showSyncLogModal}
+      schemeName={activeScheme.name}
+      logs={activeScheme.sync_logs || []}
+      onClose={() => { showSyncLogModal = false }}
+    />
   {/if}
 
 </div>

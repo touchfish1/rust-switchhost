@@ -93,7 +93,11 @@ pub fn import_schemes(state: State<AppState>, path: String) -> Result<Vec<Scheme
 }
 
 #[tauri::command]
-pub async fn sync_remote_scheme(state: State<'_, AppState>, id: String) -> Result<Scheme, String> {
+pub async fn sync_remote_scheme(
+    state: State<'_, AppState>,
+    id: String,
+    trigger: Option<String>,
+) -> Result<Scheme, String> {
     let scheme = {
         let manager = state.scheme_manager.lock().map_err(|e| e.to_string())?;
         manager.get_scheme(&id).map_err(|e| e.to_string())?
@@ -128,13 +132,14 @@ pub async fn sync_remote_scheme(state: State<'_, AppState>, id: String) -> Resul
     .await;
 
     let mut manager = state.scheme_manager.lock().map_err(|e| e.to_string())?;
+    let trigger = trigger.unwrap_or_else(|| "manual".to_string());
 
     match result {
         Ok(content) => manager
-            .apply_remote_scheme_content(&id, content)
+            .apply_remote_scheme_content_with_trigger(&id, content, &trigger)
             .map_err(|e| e.to_string()),
         Err(error_message) => {
-            let _ = manager.mark_remote_sync_error(&id, error_message.clone());
+            let _ = manager.mark_remote_sync_error_with_trigger(&id, error_message.clone(), &trigger);
             Err(error_message)
         }
     }

@@ -1,4 +1,4 @@
-use super::{Scheme, SchemeConfig};
+use super::{Scheme, SchemeConfig, SyncLogEntry};
 use crate::hosts;
 use chrono::Utc;
 use std::fs;
@@ -11,6 +11,8 @@ pub struct SchemeManager {
 }
 
 impl SchemeManager {
+    const MAX_SYNC_LOGS: usize = 50;
+
     pub fn new() -> io::Result<Self> {
         let config_dir = match dirs::config_dir() {
             Some(dir) => dir.join("rust-switchhost"),
@@ -225,7 +227,12 @@ impl SchemeManager {
         }
     }
 
-    pub fn apply_remote_scheme_content(&mut self, id: &str, content: String) -> io::Result<Scheme> {
+    pub fn apply_remote_scheme_content_with_trigger(
+        &mut self,
+        id: &str,
+        content: String,
+        trigger: &str,
+    ) -> io::Result<Scheme> {
         let is_enabled = self
             .active_ids_for_platform(&Self::current_platform())
             .iter()
@@ -235,6 +242,16 @@ impl SchemeManager {
             scheme.content = content;
             scheme.last_synced_at = Some(Utc::now());
             scheme.last_sync_error = None;
+            Self::push_sync_log(
+                scheme,
+                "success",
+                trigger,
+                if is_enabled {
+                    "远程同步成功，已自动应用到当前系统 Hosts".to_string()
+                } else {
+                    "远程同步成功".to_string()
+                },
+            );
             scheme.updated_at = Utc::now();
         } else {
             return Err(io::Error::new(io::ErrorKind::NotFound, "Scheme not found"));
@@ -249,9 +266,16 @@ impl SchemeManager {
         self.get_scheme(id)
     }
 
-    pub fn mark_remote_sync_error(&mut self, id: &str, error_message: String) -> io::Result<Scheme> {
+    pub fn mark_remote_sync_error_with_trigger(
+        &mut self,
+        id: &str,
+        error_message: String,
+        trigger: &str,
+    ) -> io::Result<Scheme> {
         if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
             scheme.last_sync_error = Some(error_message);
+            let message = scheme.last_sync_error.clone().unwrap_or_else(|| "未知同步错误".to_string());
+            Self::push_sync_log(scheme, "error", trigger, message);
             scheme.updated_at = Utc::now();
             self.save_config()?;
             self.get_scheme(id)
@@ -374,6 +398,22 @@ impl SchemeManager {
                 return candidate;
             }
             index += 1;
+        }
+    }
+
+    fn push_sync_log(scheme: &mut Scheme, status: &str, trigger: &str, message: String) {
+        scheme.sync_logs.insert(
+            0,
+            SyncLogEntry {
+                timestamp: Utc::now(),
+                status: status.to_string(),
+                trigger: trigger.to_string(),
+                message,
+            },
+        );
+
+        if scheme.sync_logs.len() > Self::MAX_SYNC_LOGS {
+            scheme.sync_logs.truncate(Self::MAX_SYNC_LOGS);
         }
     }
 }

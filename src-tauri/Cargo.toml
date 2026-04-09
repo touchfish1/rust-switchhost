@@ -1,6 +1,6 @@
 [package]
 name = "rust-switchhost"
-version = "0.0.17"
+version = "0.0.18"
 description = "A cross-platform hosts file management tool"
 authors = ["you"]
 edition = "2021"
