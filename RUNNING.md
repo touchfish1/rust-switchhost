@@ -107,8 +107,9 @@ registry = "https://mirrors.ustc.edu.cn/crates.io-index"
 - 右键 → 以管理员身份运行
 
 **macOS/Linux**：
-- 需要 sudo 权限
-- 应用会提示输入密码
+- 修改 `/etc/hosts` 需要额外权限
+- 不要直接用 `sudo` 启动图形界面应用，否则在 Ubuntu 中可能出现 `unable to get session bus`
+- 应保持应用在当前桌面用户会话中运行，再通过 `pkexec` / polkit 或系统权限配置完成写入
 
 ### 3. 沙箱环境限制
 

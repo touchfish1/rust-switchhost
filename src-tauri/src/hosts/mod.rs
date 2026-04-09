@@ -1,7 +1,13 @@
 use std::fs;
-use std::io;
 use std::fs::OpenOptions;
+use std::io;
 use std::path::PathBuf;
+
+#[cfg(target_os = "linux")]
+use std::path::Path;
+
+#[cfg(target_os = "linux")]
+use std::process::Command;
 
 pub fn get_hosts_path() -> PathBuf {
     #[cfg(target_os = "windows")]
@@ -43,7 +49,19 @@ pub fn write_hosts_file(content: &str) -> io::Result<()> {
 
     backup_hosts_file()?;
 
-    fs::write(path, content)
+    match fs::write(&path, content) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            #[cfg(target_os = "linux")]
+            {
+                if error.kind() == io::ErrorKind::PermissionDenied {
+                    return write_hosts_file_with_pkexec(content);
+                }
+            }
+
+            Err(error)
+        }
+    }
 }
 
 pub fn backup_hosts_file() -> io::Result<String> {
@@ -57,4 +75,66 @@ pub fn backup_hosts_file() -> io::Result<String> {
     fs::copy(&hosts_path, &backup_path)?;
 
     Ok(backup_path.to_string_lossy().to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn write_hosts_file_with_pkexec(content: &str) -> io::Result<()> {
+    ensure_pkexec_available()?;
+
+    let temp_path = create_temp_hosts_file(content)?;
+
+    let status = Command::new("pkexec")
+        .arg("/usr/bin/install")
+        .arg("-m")
+        .arg("644")
+        .arg(&temp_path)
+        .arg(get_hosts_path())
+        .status();
+
+    let cleanup_result = fs::remove_file(&temp_path);
+
+    match status {
+        Ok(status) if status.success() => {
+            cleanup_result?;
+            Ok(())
+        }
+        Ok(status) => {
+            let _ = cleanup_result;
+            let message = match status.code() {
+                Some(126) => "pkexec 无法执行 install，请确认系统已安装 polkit 和 coreutils".to_string(),
+                Some(127) => "pkexec 未找到 /usr/bin/install，请确认系统环境完整".to_string(),
+                Some(code) => format!("pkexec 提权写入 /etc/hosts 失败，退出码: {}", code),
+                None => "pkexec 提权写入 /etc/hosts 被中断".to_string(),
+            };
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, message))
+        }
+        Err(error) => {
+            let _ = cleanup_result;
+            Err(io::Error::new(
+                error.kind(),
+                format!("无法启动 pkexec。请确认系统已安装 polkit，并在桌面会话中运行应用: {}", error),
+            ))
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_pkexec_available() -> io::Result<()> {
+    let paths = [Path::new("/usr/bin/pkexec"), Path::new("/bin/pkexec")];
+    if paths.iter().any(|path| path.exists()) {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "未找到 pkexec。请先安装 polkit，例如在 Ubuntu 上安装 policykit-1",
+        ))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn create_temp_hosts_file(content: &str) -> io::Result<PathBuf> {
+    let filename = format!("rust-switchhost-hosts-{}.tmp", uuid::Uuid::new_v4());
+    let path = std::env::temp_dir().join(filename);
+    fs::write(&path, content)?;
+    Ok(path)
 }

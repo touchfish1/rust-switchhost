@@ -180,7 +180,7 @@ rust-switchhost/
 ### 权限要求
 
 - **Windows**: 需要管理员权限修改 `C:\Windows\System32\drivers\etc\hosts`
-- **macOS/Linux**: 需要 `sudo` 权限修改 `/etc/hosts`
+- **macOS/Linux**: 修改 `/etc/hosts` 需要额外权限，但不要直接用 `sudo` 启动图形界面应用；应保持应用在当前桌面用户会话中运行，并通过 `pkexec` / polkit 或系统权限配置完成写入
 
 ### 首次运行
 

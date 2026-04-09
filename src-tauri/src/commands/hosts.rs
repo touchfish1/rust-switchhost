@@ -40,7 +40,7 @@ pub fn check_hosts_permission() -> HostsPermissionInfo {
                 hosts_path
             ),
             _ => format!(
-                "当前没有修改 Hosts 文件的权限。请使用 sudo 或 root 权限启动应用，或确保当前用户可写入 {}",
+                "当前没有修改 Hosts 文件的权限。不要直接用 sudo 启动图形界面应用，否则可能丢失桌面 session bus。请改为让当前桌面用户运行应用，并通过 polkit/pkexec 或系统权限配置来写入 {}",
                 hosts_path
             ),
         }
