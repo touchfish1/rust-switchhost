@@ -1,6 +1,6 @@
 {
   "name": "rust-switchhost",
-  "version": "0.1.0",
+  "version": "0.0.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,7 +17,8 @@
     "@codemirror/view": "^6.41.0",
     "@lezer/highlight": "^1.2.3",
     "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-shell": "^2.0.0"
+    "@tauri-apps/plugin-shell": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.10.1"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^4.0.0",

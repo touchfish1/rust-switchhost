@@ -49,3 +49,6 @@ coverage/
 *.tmp
 *.temp
 .cache/
+
+# Local updater signing material
+.tauri/

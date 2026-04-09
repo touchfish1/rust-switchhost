@@ -14,6 +14,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState {
             scheme_manager: Mutex::new(scheme_manager),
         })
@@ -36,6 +37,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
+            commands::restart_app,
             commands::hosts::get_hosts_content,
             commands::hosts::write_hosts_content,
             commands::schemes::get_all_schemes,
@@ -45,6 +47,7 @@ pub fn run() {
             commands::schemes::switch_scheme,
             commands::schemes::set_scheme_enabled,
             commands::schemes::fetch_remote_hosts,
+            commands::updates::check_for_updates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

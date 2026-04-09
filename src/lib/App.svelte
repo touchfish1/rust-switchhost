@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
+  import { open } from '@tauri-apps/plugin-shell'
+  import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
   import Sidebar from './components/Sidebar.svelte'
   import Editor from './components/Editor.svelte'
   import ThemeToggle from './components/ThemeToggle.svelte'
@@ -14,6 +16,17 @@
     created_at: string
     updated_at: string
   }
+
+  interface UpdateInfo {
+    current_version: string
+    latest_version: string
+    has_update: boolean
+    release_name: string
+    published_at: string
+    body: string
+    html_url: string
+    download_url: string | null
+  }
   
   let schemes: Scheme[] = []
   let activeSchemeId: string | null = null
@@ -26,9 +39,14 @@
   let showCreateModal = false
   let showDeleteModal = false
   let showCurrentHostsModal = false
+  let showUpdateModal = false
   let deleteTargetId: string | null = null
   let newSchemeName = ''
   let currentHostsContent = ''
+  let updateInfo: UpdateInfo | null = null
+  let availableUpdate: Update | null = null
+  let isInstallingUpdate = false
+  let updateProgressText = ''
   
   onMount(async () => {
     const savedTheme = localStorage.getItem('theme')
@@ -88,6 +106,88 @@
       console.error('Failed to get current hosts content:', e)
     } finally {
       isLoading = false
+    }
+  }
+
+  async function handleCheckUpdates() {
+    try {
+      isLoading = true
+      error = null
+      const [releaseInfo, updaterUpdate] = await Promise.all([
+        invoke<UpdateInfo>('check_for_updates'),
+        check()
+      ])
+
+      updateInfo = releaseInfo
+      availableUpdate = updaterUpdate
+      showUpdateModal = true
+
+      if (updateInfo && !updateInfo.has_update) {
+        showSuccessToast(`当前已是最新版本 ${updateInfo.current_version}`)
+      }
+    } catch (e) {
+      error = `检查更新失败: ${e}`
+      console.error('Failed to check for updates:', e)
+    } finally {
+      isLoading = false
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!availableUpdate) {
+      if (updateInfo?.download_url) {
+        await openUpdateUrl(updateInfo.download_url)
+      } else if (updateInfo?.html_url) {
+        await openUpdateUrl(updateInfo.html_url)
+      }
+      return
+    }
+
+    try {
+      isInstallingUpdate = true
+      error = null
+      updateProgressText = '正在准备下载更新...'
+
+      await availableUpdate.downloadAndInstall((event: DownloadEvent) => {
+        if (event.event === 'Started') {
+          const total = event.data.contentLength
+          updateProgressText = total
+            ? `开始下载更新，总大小 ${(total / 1024 / 1024).toFixed(2)} MB`
+            : '开始下载更新'
+        } else if (event.event === 'Progress') {
+          updateProgressText = `正在下载更新，已接收 ${(event.data.chunkLength / 1024).toFixed(1)} KB 数据块`
+        } else if (event.event === 'Finished') {
+          updateProgressText = '下载完成，正在安装更新...'
+        }
+      })
+
+      updateProgressText = '安装完成，应用即将重启...'
+      await invoke('restart_app')
+    } catch (e) {
+      error = `安装更新失败: ${e}`
+      console.error('Failed to install update:', e)
+      updateProgressText = ''
+    } finally {
+      isInstallingUpdate = false
+    }
+  }
+
+  async function openUpdateUrl(url: string) {
+    try {
+      await open(url)
+    } catch (e) {
+      console.error('Failed to open external url:', e)
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  function formatPublishedAt(value: string) {
+    if (!value) return '未知'
+
+    try {
+      return new Date(value).toLocaleString()
+    } catch {
+      return value
     }
   }
   
@@ -238,6 +338,9 @@
   <div class="header">
     <h1>🔧 Rust SwitchHost</h1>
     <div class="header-actions">
+      <button class="btn-secondary" on:click={handleCheckUpdates} disabled={isLoading}>
+        检查更新
+      </button>
       <button class="btn-secondary" on:click={openCurrentHostsModal} disabled={isLoading}>
         查看当前 Hosts
       </button>
@@ -347,6 +450,102 @@
 
         <div class="hosts-modal-body">
           <Editor content={currentHostsContent} readOnly={true} />
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showUpdateModal && updateInfo}
+    <div
+      class="hosts-modal-overlay"
+      on:click|self={() => showUpdateModal = false}
+      on:keydown={(e) => e.key === 'Escape' && (showUpdateModal = false)}
+      role="dialog"
+      aria-modal="true"
+      aria-label="检查更新"
+      tabindex="0"
+    >
+      <div class="update-modal" role="document">
+        <div class="hosts-modal-header">
+          <div>
+            <h3>在线升级</h3>
+            <p>
+              当前版本 {updateInfo.current_version} · 最新版本 {updateInfo.latest_version}
+            </p>
+          </div>
+          <button
+            class="hosts-close-btn"
+            on:click={() => showUpdateModal = false}
+            aria-label="关闭"
+          >
+            ×
+          </button>
+        </div>
+
+        <div class="update-modal-body">
+          <div class:status-card={true} class:update-available={updateInfo.has_update}>
+            <strong>{updateInfo.has_update ? '发现新版本' : '当前已是最新版本'}</strong>
+            <span>发布时间：{formatPublishedAt(updateInfo.published_at)}</span>
+          </div>
+
+          <div class="update-meta">
+            <div class="update-meta-row">
+              <span>版本标题</span>
+              <strong>{updateInfo.release_name}</strong>
+            </div>
+            <div class="update-meta-row">
+              <span>一键升级</span>
+              <strong>{availableUpdate ? '可直接下载安装' : '当前仅可跳转下载'}</strong>
+            </div>
+            <div class="update-meta-row">
+              <span>发布页</span>
+              <button class="link-btn" on:click={() => openUpdateUrl(updateInfo.html_url)}>
+                打开 GitHub Release
+              </button>
+            </div>
+            {#if updateInfo.download_url}
+              <div class="update-meta-row">
+                <span>推荐下载</span>
+                <button class="link-btn" on:click={() => openUpdateUrl(updateInfo.download_url!)}>
+                  打开当前系统下载链接
+                </button>
+              </div>
+            {/if}
+          </div>
+
+          <div class="release-notes">
+            <h4>发布说明</h4>
+            <pre>{updateInfo.body || '暂无发布说明'}</pre>
+          </div>
+
+          {#if updateInfo.has_update}
+            <div class="update-actions">
+              <button
+                class="btn-secondary"
+                on:click={() => openUpdateUrl(updateInfo.html_url)}
+                disabled={isInstallingUpdate}
+              >
+                查看发布页
+              </button>
+              <button
+                class="btn-primary"
+                on:click={handleInstallUpdate}
+                disabled={isInstallingUpdate}
+              >
+                {isInstallingUpdate
+                  ? '升级中...'
+                  : availableUpdate
+                    ? '一键下载安装并重启'
+                    : '打开下载链接'}
+              </button>
+            </div>
+          {/if}
+
+          {#if updateProgressText}
+            <div class="update-progress">
+              {updateProgressText}
+            </div>
+          {/if}
         </div>
       </div>
     </div>
@@ -682,5 +881,125 @@
   .hosts-modal-body {
     flex: 1;
     min-height: 0;
+  }
+
+  .update-modal {
+    width: min(760px, 100%);
+    max-height: min(760px, calc(100vh - 48px));
+    background: var(--editor-bg);
+    border-radius: 12px;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .update-modal-body {
+    padding: 20px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .status-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--hover-bg);
+    border: 1px solid var(--border-color);
+  }
+
+  .status-card strong {
+    font-size: 15px;
+    color: var(--text-primary);
+  }
+
+  .status-card span {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .status-card.update-available {
+    border-color: #91d5ff;
+    background: rgba(24, 144, 255, 0.08);
+  }
+
+  .update-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .update-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .update-meta-row span {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .update-meta-row strong {
+    font-size: 14px;
+    color: var(--text-primary);
+    text-align: right;
+  }
+
+  .link-btn {
+    border: none;
+    background: transparent;
+    color: var(--primary-color);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 0;
+  }
+
+  .link-btn:hover {
+    color: var(--primary-hover);
+    text-decoration: underline;
+  }
+
+  .release-notes h4 {
+    margin: 0 0 10px 0;
+    color: var(--text-primary);
+    font-size: 15px;
+  }
+
+  .release-notes pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    background: var(--hover-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+
+  .update-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+
+  .update-progress {
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--hover-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 13px;
   }
 </style>

@@ -1,6 +1,3 @@
-mod parser;
-mod writer;
-
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -54,21 +51,4 @@ pub fn backup_hosts_file() -> io::Result<String> {
     fs::copy(&hosts_path, &backup_path)?;
 
     Ok(backup_path.to_string_lossy().to_string())
-}
-
-pub fn parse_hosts(content: &str) -> Vec<HostEntry> {
-    parser::parse(content)
-}
-
-pub fn serialize_hosts(entries: &[HostEntry]) -> String {
-    parser::serialize(entries)
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct HostEntry {
-    pub ip: String,
-    pub domain: String,
-    pub comment: Option<String>,
-    pub enabled: bool,
-    pub line_number: usize,
 }

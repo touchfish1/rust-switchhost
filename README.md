@@ -56,7 +56,7 @@ npm run tauri build
 项目已包含 GitHub Actions 发布工作流：
 
 - 工作流文件：`.github/workflows/release.yml`
-- 触发方式：推送 `v*` 格式的 tag，例如 `v0.1.0`
+- 触发方式：推送 `v*` 格式的 tag，例如 `v0.0.4`
 - 发布结果：自动构建 Windows / macOS / Linux 安装包，并上传到对应的 GitHub Release
 - 默认 Linux runner：GitHub-hosted `ubuntu-22.04`
 - 额外 Linux 发行版：支持通过 self-hosted runner 扩展，例如 Rocky Linux
@@ -64,8 +64,8 @@ npm run tauri build
 示例发布流程：
 
 ```bash
-git tag v0.1.0
-git push githost v0.1.0
+git tag v0.0.4
+git push githost v0.0.4
 ```
 
 也可以在 GitHub Actions 页面手动触发 `Release` 工作流，并填写 `release_tag`。
@@ -81,6 +81,21 @@ GitHub-hosted Linux runner 默认只有 Ubuntu，因此像 Rocky Linux、AlmaLin
 3. 在 GitHub 仓库变量中设置 `ENABLE_SELF_HOSTED_LINUX=true`
 
 启用后，发布流程会额外在 Rocky Linux runner 上构建并把产物上传到同一个 GitHub Release。
+
+### 在线升级配置
+
+项目已经接入 Tauri Updater，可实现应用内一键下载安装并自动重启升级。
+
+要让 GitHub Release 产出可用于在线升级的安装包与 `latest.json`，还需要在仓库 Secrets 中配置：
+
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+
+说明：
+
+- 公钥已经写入 [src-tauri/tauri.conf.json](/d:/opensource/rust-switchhost/src-tauri/tauri.conf.json)
+- 私钥不要提交到仓库，建议仅保存在本地或 CI Secrets 中
+- Release 工作流发布成功后，应用内“检查更新”即可执行“一键下载安装并重启”
 
 ## 📁 项目结构
 
