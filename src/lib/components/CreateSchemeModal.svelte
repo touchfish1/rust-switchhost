@@ -3,6 +3,12 @@
 
   export let isOpen = false
   export let isSubmitting = false
+  export let mode: 'create' | 'edit-remote' = 'create'
+  export let initialName = ''
+  export let initialType: 'local' | 'remote' = 'local'
+  export let initialRemoteUrl = ''
+  export let initialAutoSyncEnabled = true
+  export let initialSyncIntervalMinutes = '15'
 
   const dispatch = createEventDispatcher()
 
@@ -11,13 +17,19 @@
   let remoteUrl = ''
   let autoSyncEnabled = true
   let syncIntervalMinutes = '15'
+  let wasOpen = false
 
-  $: if (isOpen) {
-    name = ''
-    schemeType = 'local'
-    remoteUrl = ''
-    autoSyncEnabled = true
-    syncIntervalMinutes = '15'
+  $: if (isOpen && !wasOpen) {
+    name = initialName
+    schemeType = initialType
+    remoteUrl = initialRemoteUrl
+    autoSyncEnabled = initialAutoSyncEnabled
+    syncIntervalMinutes = initialSyncIntervalMinutes
+    wasOpen = true
+  }
+
+  $: if (!isOpen && wasOpen) {
+    wasOpen = false
   }
 
   function handleClose() {
@@ -42,14 +54,14 @@
     on:keydown={(event) => event.key === 'Escape' && handleClose()}
     role="dialog"
     aria-modal="true"
-    aria-label="创建新分组"
+    aria-label={mode === 'edit-remote' ? '编辑远程分组' : '创建新分组'}
     tabindex="0"
   >
     <div class="modal" role="document">
       <div class="modal-header">
         <div>
-          <h3>创建新分组</h3>
-          <p>支持创建普通分组或远程 URL 分组</p>
+          <h3>{mode === 'edit-remote' ? '编辑远程分组' : '创建新分组'}</h3>
+          <p>{mode === 'edit-remote' ? '修改远程 URL、同步开关和同步间隔' : '支持创建普通分组或远程 URL 分组'}</p>
         </div>
         <button class="close-btn" on:click={handleClose} aria-label="关闭">×</button>
       </div>
@@ -65,32 +77,34 @@
           />
         </label>
 
-        <div class="form-group">
-          <span>分组类型</span>
-          <div class="type-grid">
-            <button
-              class="type-card"
-              class:selected={schemeType === 'local'}
-              type="button"
-              on:click={() => (schemeType = 'local')}
-              disabled={isSubmitting}
-            >
-              <strong>本地分组</strong>
-              <small>手动编辑 hosts 内容</small>
-            </button>
+        {#if mode === 'create'}
+          <div class="form-group">
+            <span>分组类型</span>
+            <div class="type-grid">
+              <button
+                class="type-card"
+                class:selected={schemeType === 'local'}
+                type="button"
+                on:click={() => (schemeType = 'local')}
+                disabled={isSubmitting}
+              >
+                <strong>本地分组</strong>
+                <small>手动编辑 hosts 内容</small>
+              </button>
 
-            <button
-              class="type-card"
-              class:selected={schemeType === 'remote'}
-              type="button"
-              on:click={() => (schemeType = 'remote')}
-              disabled={isSubmitting}
-            >
-              <strong>远程 URL</strong>
-              <small>首次创建后自动拉取并可定时同步</small>
-            </button>
+              <button
+                class="type-card"
+                class:selected={schemeType === 'remote'}
+                type="button"
+                on:click={() => (schemeType = 'remote')}
+                disabled={isSubmitting}
+              >
+                <strong>远程 URL</strong>
+                <small>首次创建后自动拉取并可定时同步</small>
+              </button>
+            </div>
           </div>
-        </div>
+        {/if}
 
         {#if schemeType === 'remote'}
           <label class="form-group">
@@ -131,7 +145,7 @@
           取消
         </button>
         <button class="btn btn-primary" type="button" on:click={handleConfirm} disabled={isSubmitting}>
-          {isSubmitting ? '创建中...' : '创建分组'}
+          {isSubmitting ? (mode === 'edit-remote' ? '保存中...' : '创建中...') : (mode === 'edit-remote' ? '保存修改' : '创建分组')}
         </button>
       </div>
     </div>

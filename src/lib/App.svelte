@@ -57,6 +57,8 @@
   let showDeleteModal = false
   let showCurrentHostsModal = false
   let showUpdateModal = false
+  let createModalMode: 'create' | 'edit-remote' = 'create'
+  let remoteEditTarget: Scheme | null = null
   let deleteTargetId: string | null = null
   let currentHostsContent = ''
   let updateInfo: UpdateInfo | null = null
@@ -291,6 +293,16 @@
   }
   
   function openCreateModal() {
+    createModalMode = 'create'
+    remoteEditTarget = null
+    showCreateModal = true
+  }
+
+  function openRemoteEditModal(id: string) {
+    const target = schemes.find((scheme) => scheme.id === id && scheme.remote_url) || null
+    if (!target) return
+    createModalMode = 'edit-remote'
+    remoteEditTarget = target
     showCreateModal = true
   }
   
@@ -316,6 +328,31 @@
       isCreatingScheme = true
       isLoading = true
       error = null
+
+      if (createModalMode === 'edit-remote' && remoteEditTarget) {
+        const renamedScheme = await invoke<Scheme>('update_scheme', {
+          id: remoteEditTarget.id,
+          name,
+          content: schemes.find((scheme) => scheme.id === remoteEditTarget.id)?.content || ''
+        })
+
+        const updatedRemoteScheme = await invoke<Scheme>('update_scheme_remote_config', {
+          id: remoteEditTarget.id,
+          remoteUrl,
+          autoSyncEnabled,
+          syncIntervalMinutes
+        })
+
+        applyUpdatedScheme({
+          ...updatedRemoteScheme,
+          name: renamedScheme.name
+        })
+        showCreateModal = false
+        remoteEditTarget = null
+        showSuccessToast('远程分组配置已更新')
+        return
+      }
+
       let newScheme = await invoke<Scheme>('create_scheme', {
         name,
         content: type === 'remote'
@@ -647,6 +684,7 @@
       on:import={handleImportSchemes}
       on:export={handleExportSchemes}
       on:delete={(e) => openDeleteModal(e.detail.id)}
+      on:editRemote={(e) => openRemoteEditModal(e.detail.id)}
       on:rename={handleRename}
       on:toggle={handleToggleScheme}
       on:resize={handleSidebarResize}
@@ -704,8 +742,18 @@
     <CreateSchemeModal
       isOpen={showCreateModal}
       isSubmitting={isCreatingScheme}
+      mode={createModalMode}
+      initialName={remoteEditTarget?.name || ''}
+      initialType={remoteEditTarget ? 'remote' : 'local'}
+      initialRemoteUrl={remoteEditTarget?.remote_url || ''}
+      initialAutoSyncEnabled={remoteEditTarget?.auto_sync_enabled || false}
+      initialSyncIntervalMinutes={remoteEditTarget?.sync_interval_minutes ? String(remoteEditTarget.sync_interval_minutes) : '15'}
       on:confirm={handleCreateConfirm}
-      on:close={() => showCreateModal = false}
+      on:close={() => {
+        showCreateModal = false
+        remoteEditTarget = null
+        createModalMode = 'create'
+      }}
     />
   {/if}
   

@@ -63,6 +63,11 @@
     event.stopPropagation()
     dispatch('delete', { id })
   }
+
+  function editRemoteScheme(id: string, event: Event) {
+    event.stopPropagation()
+    dispatch('editRemote', { id })
+  }
   
   function toggleScheme(id: string, event: Event) {
     event.stopPropagation()
@@ -227,9 +232,9 @@
               
               <button
                 class="btn-edit"
-                on:click={(e) => startEdit(scheme.id, scheme.name, e)}
-                title="编辑名称"
-                aria-label="编辑名称"
+                on:click={(e) => scheme.remote_url ? editRemoteScheme(scheme.id, e) : startEdit(scheme.id, scheme.name, e)}
+                title={scheme.remote_url ? '编辑远程配置' : '编辑名称'}
+                aria-label={scheme.remote_url ? '编辑远程配置' : '编辑名称'}
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 20h9"/>
