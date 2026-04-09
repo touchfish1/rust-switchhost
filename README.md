@@ -77,10 +77,45 @@ GitHub-hosted Linux runner 默认只有 Ubuntu，因此像 Rocky Linux、AlmaLin
 当前工作流已经预留了 Rocky Linux 发布 job，启用方式如下：
 
 1. 准备一台 Rocky Linux 机器，并安装 GitHub Actions self-hosted runner
-2. 给该 runner 打上标签：`self-hosted`, `linux`, `x64`, `rockylinux`
+2. 给该 runner 打上标签：`self-hosted`, `linux`, `x64`, `rocky-linux`
 3. 在 GitHub 仓库变量中设置 `ENABLE_SELF_HOSTED_LINUX=true`
 
 启用后，发布流程会额外在 Rocky Linux runner 上构建并把产物上传到同一个 GitHub Release。
+
+### Gitee 国内镜像发布
+
+项目已新增 Gitee Go 流水线配置文件：
+
+- `/.workflow/gitee-release.yml`
+
+用途：
+
+- 监听 Gitee 仓库中的 `v*` tag
+- 在 Gitee 流水线中构建 Linux 安装包
+- 自动创建或更新 Gitee Release
+- 将构建产物作为国内镜像附件上传到 Gitee Release
+
+建议定位：
+
+- GitHub Release：主发布源，同时用于应用内在线升级
+- Gitee Release：国内镜像下载源
+
+Gitee 侧需要额外配置的环境变量：
+
+- `GITEE_RELEASE_TOKEN`
+- `GITEE_RELEASE_OWNER`
+- `GITEE_RELEASE_REPO`
+
+推荐值：
+
+- `GITEE_RELEASE_OWNER=chengccn1`
+- `GITEE_RELEASE_REPO=rust-switchhost`
+
+说明：
+
+- `GITEE_RELEASE_TOKEN` 需要使用 Gitee 个人访问令牌，并至少具备当前仓库的发布权限
+- 当前 Gitee 流水线默认构建 Linux 产物，适合作为国内镜像发布
+- 在线升级仍然继续使用 GitHub Release 与签名产物
 
 ### 在线升级配置
 
@@ -127,19 +162,6 @@ rust-switchhost/
 - [x] 文件读写和备份机制
 - [x] 权限错误处理
 - [x] 基础 UI 框架
-
-### 进行中 🚧
-
-- [ ] 主界面 UI 完善
-- [ ] 代码编辑器集成
-- [ ] 系统托盘功能
-
-### 计划中 📋
-
-- [ ] 远程 hosts 同步
-- [ ] 导入导出功能
-- [ ] 深色/浅色主题
-- [ ] 多语言支持
 
 ## 🔧 开发指南
 

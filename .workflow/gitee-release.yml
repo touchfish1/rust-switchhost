@@ -1,0 +1,84 @@
+version: '1.0'
+name: gitee-release
+displayName: Gitee 国内镜像发布
+
+triggers:
+  push:
+    tags:
+      prefix:
+        - v
+
+stages:
+  - stage:
+      name: release_stage
+      displayName: 构建并发布 Linux 镜像
+      failFast: true
+      steps:
+        - step: npmbuild@1
+          name: build_and_release
+          displayName: 构建 Tauri Linux 包并同步到 Gitee Release
+          inputs:
+            nodeVersion: 14.15
+            goals: |
+              set -e
+
+              TAG_NAME="$(git describe --tags --exact-match 2>/dev/null || true)"
+              if [ -z "$TAG_NAME" ]; then
+                echo "无法识别当前 tag，Gitee 镜像发布终止"
+                exit 1
+              fi
+
+              VERSION="${TAG_NAME#v}"
+              echo "发布版本: $TAG_NAME"
+
+              export NVM_DIR="$HOME/.nvm"
+              if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+                curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+              fi
+              . "$NVM_DIR/nvm.sh"
+              nvm install 20
+              nvm use 20
+
+              npm pkg set version="$VERSION"
+
+              if ! command -v rustup >/dev/null 2>&1; then
+                curl https://sh.rustup.rs -sSf | sh -s -- -y
+              fi
+              . "$HOME/.cargo/env"
+              rustup default stable
+
+              if command -v apt-get >/dev/null 2>&1; then
+                sudo apt-get update
+                sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+              elif command -v dnf >/dev/null 2>&1; then
+                sudo dnf install -y \
+                  webkit2gtk4.1-devel \
+                  openssl-devel \
+                  curl \
+                  wget \
+                  file \
+                  libappindicator-gtk3-devel \
+                  librsvg2-devel \
+                  libxdo-devel \
+                  patchelf \
+                  gcc \
+                  gcc-c++ \
+                  make
+              fi
+
+              node -v
+              npm -v
+              rustc -V
+              cargo -V
+
+              npm ci
+              npm run tauri build
+
+              export GITEE_RELEASE_TAG="$TAG_NAME"
+              export GITEE_RELEASE_ARTIFACT_DIR="./src-tauri/target/release/bundle"
+              node scripts/gitee-release-upload.mjs
+            uploadArtifact: true
+            uploadArtifactOptions:
+              artifactPath: './src-tauri/target/release/bundle'
+              artifactRepository: 'default'
+              artifactName: 'rust-switchhost-linux-bundle'
