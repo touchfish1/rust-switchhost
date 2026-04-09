@@ -3,15 +3,15 @@ mod hosts;
 mod schemes;
 mod tray;
 
-use std::sync::Mutex;
-use tauri::Manager;
 use commands::schemes::AppState;
 use schemes::SchemeManager;
+use std::sync::Mutex;
+use tauri::{Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let scheme_manager = SchemeManager::new().expect("Failed to initialize SchemeManager");
-    
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
@@ -23,10 +23,16 @@ pub fn run() {
                 let window = app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
-            
+
             tray::setup_tray(&app.handle())?;
-            
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                window.hide().unwrap();
+                api.prevent_close();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
@@ -37,6 +43,7 @@ pub fn run() {
             commands::schemes::update_scheme,
             commands::schemes::delete_scheme,
             commands::schemes::switch_scheme,
+            commands::schemes::set_scheme_enabled,
             commands::schemes::fetch_remote_hosts,
         ])
         .run(tauri::generate_context!())

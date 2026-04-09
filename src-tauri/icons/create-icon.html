@@ -1,0 +1,50 @@
+<html>
+<body>
+  <canvas id="canvas" width="32" height="32"></canvas>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // 绘制背景
+    ctx.fillStyle = '#1890ff';
+    ctx.beginPath();
+    ctx.roundRect(0, 0, 32, 32, 4);
+    ctx.fill();
+    
+    // 绘制网格线
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    
+    // 水平线
+    ctx.beginPath();
+    ctx.moveTo(8, 12);
+    ctx.lineTo(24, 12);
+    ctx.moveTo(8, 16);
+    ctx.lineTo(24, 16);
+    ctx.moveTo(8, 20);
+    ctx.lineTo(24, 20);
+    ctx.stroke();
+    
+    // 垂直线
+    ctx.beginPath();
+    ctx.moveTo(12, 8);
+    ctx.lineTo(12, 24);
+    ctx.moveTo(16, 8);
+    ctx.lineTo(16, 24);
+    ctx.moveTo(20, 8);
+    ctx.lineTo(20, 24);
+    ctx.stroke();
+    
+    // 绘制点
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.arc(24, 8, 2, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // 保存为 PNG
+    const dataURL = canvas.toDataURL('image/png');
+    console.log('PNG data URL:', dataURL);
+  </script>
+</body>
+</html>

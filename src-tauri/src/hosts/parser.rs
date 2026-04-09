@@ -6,16 +6,16 @@ pub fn parse(content: &str) -> Vec<HostEntry> {
         .enumerate()
         .filter_map(|(line_num, line)| {
             let trimmed = line.trim();
-            
+
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 return None;
             }
-            
+
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() < 2 {
                 return None;
             }
-            
+
             let ip = parts[0].to_string();
             let domain = parts[1].to_string();
             let comment = if parts.len() > 2 {
@@ -23,7 +23,7 @@ pub fn parse(content: &str) -> Vec<HostEntry> {
             } else {
                 None
             };
-            
+
             Some(HostEntry {
                 ip,
                 domain,
@@ -57,7 +57,7 @@ mod tests {
     fn test_parse_simple() {
         let content = "127.0.0.1    localhost\n192.168.1.1    example.com";
         let entries = parse(content);
-        
+
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].ip, "127.0.0.1");
         assert_eq!(entries[0].domain, "localhost");
@@ -69,23 +69,21 @@ mod tests {
     fn test_parse_with_comments() {
         let content = "# This is a comment\n127.0.0.1    localhost    # local";
         let entries = parse(content);
-        
+
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].comment, Some("local".to_string()));
     }
 
     #[test]
     fn test_serialize() {
-        let entries = vec![
-            HostEntry {
-                ip: "127.0.0.1".to_string(),
-                domain: "localhost".to_string(),
-                comment: None,
-                enabled: true,
-                line_number: 1,
-            },
-        ];
-        
+        let entries = vec![HostEntry {
+            ip: "127.0.0.1".to_string(),
+            domain: "localhost".to_string(),
+            comment: None,
+            enabled: true,
+            line_number: 1,
+        }];
+
         let result = serialize(&entries);
         assert_eq!(result, "127.0.0.1    localhost");
     }

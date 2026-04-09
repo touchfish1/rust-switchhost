@@ -6,8 +6,7 @@
   const dispatch = createEventDispatcher()
   
   function toggleTheme() {
-    isDark = !isDark
-    dispatch('toggle', { isDark })
+    dispatch('toggle', { isDark: !isDark })
   }
 </script>
 

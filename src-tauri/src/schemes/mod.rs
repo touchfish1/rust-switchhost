@@ -2,14 +2,16 @@ mod manager;
 
 pub use manager::SchemeManager;
 
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scheme {
     pub id: String,
     pub name: String,
     pub content: String,
+    #[serde(default)]
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -33,7 +35,10 @@ impl Scheme {
 pub struct SchemeConfig {
     pub version: String,
     pub schemes: Vec<Scheme>,
+    #[serde(default)]
     pub active_scheme_ids: Vec<String>,
+    #[serde(default)]
+    pub active_scheme_ids_by_platform: HashMap<String, Vec<String>>,
 }
 
 impl Default for SchemeConfig {
@@ -42,6 +47,7 @@ impl Default for SchemeConfig {
             version: "1.0".to_string(),
             schemes: Vec::new(),
             active_scheme_ids: Vec::new(),
+            active_scheme_ids_by_platform: HashMap::new(),
         }
     }
 }

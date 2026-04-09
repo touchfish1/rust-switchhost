@@ -56,14 +56,13 @@
       isLoading = true
       error = null
       schemes = await invoke('get_all_schemes')
-      
       if (schemes.length > 0 && !activeSchemeId) {
         activeSchemeId = schemes[0].id
         activeScheme = schemes[0]
         editorContent = activeScheme.content
       }
     } catch (e) {
-      error = `加载方案失败: ${e}`
+      error = `加载分组失败: ${e}`
       console.error('Failed to load schemes:', e)
     } finally {
       isLoading = false
@@ -98,7 +97,7 @@
       activeScheme = newScheme
       editorContent = newScheme.content
     } catch (e) {
-      error = `创建方案失败: ${e}`
+      error = `创建分组失败: ${e}`
       console.error('Failed to create scheme:', e)
     } finally {
       isLoading = false
@@ -119,14 +118,13 @@
       await invoke('delete_scheme', { id: deleteTargetId })
       
       schemes = schemes.filter(s => s.id !== deleteTargetId)
-      
       if (activeSchemeId === deleteTargetId) {
         activeSchemeId = schemes.length > 0 ? schemes[0].id : null
         activeScheme = activeSchemeId ? schemes[0] : null
         editorContent = activeScheme?.content || ''
       }
     } catch (e) {
-      error = `删除方案失败: ${e}`
+      error = `删除分组失败: ${e}`
       console.error('Failed to delete scheme:', e)
     } finally {
       isLoading = false
@@ -153,22 +151,6 @@
     }
   }
   
-  async function handleSwitchScheme() {
-    if (!activeSchemeId) return
-    
-    try {
-      isLoading = true
-      error = null
-      await invoke('switch_scheme', { id: activeSchemeId })
-      showSuccessToast('方案已成功应用！')
-    } catch (e) {
-      error = `切换方案失败: ${e}`
-      console.error('Failed to switch scheme:', e)
-    } finally {
-      isLoading = false
-    }
-  }
-  
   async function handleRename(event: CustomEvent) {
     const { id, name } = event.detail
     try {
@@ -187,6 +169,33 @@
     } catch (e) {
       error = `重命名失败: ${e}`
       console.error('Failed to rename scheme:', e)
+    } finally {
+      isLoading = false
+    }
+  }
+
+  async function handleToggleScheme(event: CustomEvent) {
+    const { id, enabled } = event.detail
+
+    try {
+      isLoading = true
+      error = null
+      schemes = await invoke('set_scheme_enabled', { id, enabled })
+
+      activeSchemeId = id
+
+      activeScheme = activeSchemeId
+        ? schemes.find((scheme) => scheme.id === activeSchemeId) || null
+        : null
+
+      if (activeScheme) {
+        editorContent = activeScheme.content
+      }
+
+      showSuccessToast(enabled ? '分组已启用并生效' : '分组已停用并生效')
+    } catch (e) {
+      error = `${enabled ? '启用' : '禁用'}分组失败: ${e}`
+      console.error('Failed to toggle scheme:', e)
     } finally {
       isLoading = false
     }
@@ -213,16 +222,7 @@
   <div class="header">
     <h1>🔧 Rust SwitchHost</h1>
     <div class="header-actions">
-      <ThemeToggle {isDarkMode} on:toggle={handleThemeToggle} />
-      {#if activeScheme}
-        <button
-          class="btn-primary"
-          on:click={handleSwitchScheme}
-          disabled={isLoading}
-        >
-          应用方案
-        </button>
-      {/if}
+      <ThemeToggle isDark={isDarkMode} on:toggle={handleThemeToggle} />
     </div>
   </div>
   
@@ -241,6 +241,7 @@
       on:create={openCreateModal}
       on:delete={(e) => openDeleteModal(e.detail.id)}
       on:rename={handleRename}
+      on:toggle={handleToggleScheme}
     />
     
     <div class="content">
@@ -248,7 +249,7 @@
         <div class="editor-header">
           <h2>{activeScheme.name}</h2>
           <span class="scheme-meta">
-            创建于 {new Date(activeScheme.created_at).toLocaleString()}
+            分组内容编辑中 | 创建于 {new Date(activeScheme.created_at).toLocaleString()}
           </span>
         </div>
         
@@ -259,9 +260,9 @@
       {:else}
         <div class="empty-state">
           <h2>欢迎使用 Rust SwitchHost</h2>
-          <p>请从左侧选择一个方案，或创建新方案开始使用</p>
+          <p>请从左侧选择一个分组，或创建新分组开始使用</p>
           <button class="btn-primary" on:click={openCreateModal}>
-            创建第一个方案
+            创建第一个分组
           </button>
         </div>
       {/if}
@@ -276,7 +277,7 @@
   
   {#if showCreateModal}
     <Modal
-      title="创建新方案"
+      title="创建新分组"
       confirmText="创建"
       inputValue={newSchemeName}
       on:confirm={handleCreateConfirm}
@@ -287,7 +288,7 @@
   
   {#if showDeleteModal}
     <Modal
-      title="删除方案"
+      title="删除分组"
       confirmText="删除"
       cancelText="取消"
       type="danger"
@@ -295,7 +296,7 @@
       on:cancel={() => { showDeleteModal = false; deleteTargetId = null; }}
       on:close={() => { showDeleteModal = false; deleteTargetId = null; }}
     >
-      <p class="confirm-text">确定要删除方案「{schemes.find(s => s.id === deleteTargetId)?.name || ''}」吗？</p>
+      <p class="confirm-text">确定要删除分组「{schemes.find(s => s.id === deleteTargetId)?.name || ''}」吗？</p>
       <p class="confirm-warning">此操作不可撤销。</p>
     </Modal>
   {/if}

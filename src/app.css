@@ -12,13 +12,6 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f9fafb;
-    background-color: #1e1e1e;
-  }
-}
-
 body {
   margin: 0;
   min-width: 320px;

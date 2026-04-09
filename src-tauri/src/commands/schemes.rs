@@ -50,26 +50,38 @@ pub fn switch_scheme(state: State<AppState>, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn set_scheme_enabled(
+    state: State<AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<Vec<Scheme>, String> {
+    let mut manager = state.scheme_manager.lock().map_err(|e| e.to_string())?;
+    manager
+        .set_scheme_enabled(&id, enabled)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn fetch_remote_hosts(url: String) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-    
+
     let response = client
         .get(&url)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch URL: {}", e))?;
-    
+
     if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
-    
+
     let content = response
         .text()
         .await
         .map_err(|e| format!("Failed to read response: {}", e))?;
-    
+
     Ok(content)
 }

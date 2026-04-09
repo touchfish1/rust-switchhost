@@ -23,6 +23,7 @@
   const ipDecoration = Decoration.mark({ class: 'cm-ip' })
   const invalidIpDecoration = Decoration.mark({ class: 'cm-ip-invalid' })
   const domainDecoration = Decoration.mark({ class: 'cm-domain' })
+  const invalidDomainDecoration = Decoration.mark({ class: 'cm-domain-invalid' })
   const commentDecoration = Decoration.mark({ class: 'cm-comment' })
   
   function isValidIP(ip: string): boolean {
@@ -39,6 +40,17 @@
     
     return ipv6Regex.test(ip) || ip === '::1' || ip === 'localhost'
   }
+
+  function isValidHostname(hostname: string): boolean {
+    if (!hostname || hostname.length > 253) return false
+    if (hostname === 'localhost') return true
+
+    const labels = hostname.split('.')
+    return labels.every((label) => {
+      if (!label || label.length > 63) return false
+      return /^[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?$/.test(label)
+    })
+  }
   
   function hostsHighlighter(view: EditorView): DecorationSet {
     const builder = new RangeSetBuilder<Decoration>()
@@ -52,32 +64,40 @@
       if (trimmed.startsWith('#')) {
         builder.add(pos, pos + line.length, commentDecoration)
       } else if (trimmed) {
-        const parts = trimmed.split(/\s+/)
-        if (parts.length >= 2) {
-          const leadingSpaces = line.match(/^(\s*)/)?.[1]?.length || 0
-          const ipStart = pos + leadingSpaces
-          const ip = parts[0]
-          const ipValid = isValidIP(ip)
-          
-          builder.add(ipStart, ipStart + ip.length, ipValid ? ipDecoration : invalidIpDecoration)
-          
-          let currentPos = ipStart + ip.length
-          const remainingLine = line.substring(currentPos - pos)
-          
-          for (let i = 1; i < parts.length; i++) {
-            const part = parts[i]
-            const partIndex = remainingLine.indexOf(part, currentPos - pos - (ipStart - pos + ip.length))
-            
-            if (partIndex >= 0) {
-              const absStart = pos + partIndex
-              const absEnd = absStart + part.length
-              
-              if (part.startsWith('#')) {
-                builder.add(absStart, line.length + pos, commentDecoration)
-                break
-              } else {
-                builder.add(absStart, absEnd, domainDecoration)
-              }
+        const commentIndex = line.indexOf('#')
+        const contentPart = commentIndex >= 0 ? line.slice(0, commentIndex) : line
+        const contentTrimmed = contentPart.trim()
+
+        if (commentIndex >= 0) {
+          builder.add(pos + commentIndex, pos + line.length, commentDecoration)
+        }
+
+        if (contentTrimmed) {
+          const tokenRegex = /\S+/g
+          const tokens = Array.from(contentPart.matchAll(tokenRegex))
+
+          if (tokens.length > 0) {
+            const [ipMatch, ...hostMatches] = tokens
+            const ip = ipMatch[0]
+            const ipStart = pos + ipMatch.index!
+            builder.add(
+              ipStart,
+              ipStart + ip.length,
+              isValidIP(ip) ? ipDecoration : invalidIpDecoration
+            )
+
+            for (const match of hostMatches) {
+              const hostname = match[0]
+              const hostStart = pos + match.index!
+              builder.add(
+                hostStart,
+                hostStart + hostname.length,
+                isValidHostname(hostname) ? domainDecoration : invalidDomainDecoration
+              )
+            }
+
+            if (hostMatches.length === 0) {
+              builder.add(ipStart, ipStart + ip.length, invalidIpDecoration)
             }
           }
         }
@@ -151,6 +171,10 @@
         color: 'var(--syntax-domain, #1890ff)',
         fontWeight: '500'
       },
+      '.cm-domain-invalid': {
+        color: 'var(--syntax-error, #ff4d4f)',
+        textDecoration: 'underline wavy'
+      },
       '.cm-comment': {
         color: 'var(--syntax-comment, #8c8c8c)',
         fontStyle: 'italic'
@@ -203,6 +227,10 @@
       '.cm-domain': {
         color: 'var(--syntax-domain, #569cd6)',
         fontWeight: '500'
+      },
+      '.cm-domain-invalid': {
+        color: 'var(--syntax-error, #ff6b6b)',
+        textDecoration: 'underline wavy'
       },
       '.cm-comment': {
         color: 'var(--syntax-comment, #6a9955)',

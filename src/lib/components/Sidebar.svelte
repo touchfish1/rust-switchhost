@@ -26,7 +26,8 @@
   
   function toggleScheme(id: string, event: Event) {
     event.stopPropagation()
-    dispatch('toggle', { id })
+    const target = event.currentTarget as HTMLInputElement
+    dispatch('toggle', { id, enabled: target.checked })
   }
   
   function startEdit(id: string, name: string, event: Event) {
@@ -82,11 +83,14 @@
 
 <div class="sidebar">
   <div class="sidebar-header">
-    <h2>方案列表</h2>
+    <div class="header-copy">
+      <h2>分组列表</h2>
+      <span class="header-subtitle">可同时启用多个分组</span>
+    </div>
     <button 
       class="btn-new" 
       on:click={createNewScheme} 
-      title="新建方案 (Ctrl+N)"
+      title="新建分组 (Ctrl+N)"
     >
       <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
         <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64z m192 472c0 4.4-3.6 8-8 8H544v152c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V544H328c-4.4 0-8-3.6-8-8v-48c0-4.4 3.6-8 8-8h152V328c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v152h152c4.4 0 8 3.6 8 8v48z"/>
@@ -98,9 +102,9 @@
     {#if schemes.length === 0}
       <div class="empty-state">
         <div class="empty-icon">📋</div>
-        <p>暂无方案</p>
+        <p>暂无分组</p>
         <button class="btn-create" on:click={createNewScheme}>
-          创建第一个方案
+          创建第一个分组
         </button>
       </div>
     {:else}
@@ -135,7 +139,7 @@
           
           <div class="scheme-actions">
             {#if editingId !== scheme.id}
-              <label class="switch" title="启用/禁用方案">
+              <label class="switch" title="启用/禁用分组">
                 <input 
                   type="checkbox" 
                   checked={scheme.enabled}
@@ -160,8 +164,8 @@
               <button
                 class="btn-delete"
                 on:click={(e) => deleteScheme(scheme.id, e)}
-                title="删除方案"
-                aria-label="删除方案"
+                title="删除分组"
+                aria-label="删除分组"
               >
                 <svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor">
                   <path d="M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0 4.4 3.6 8 8 8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72z"/>
@@ -177,7 +181,8 @@
   
   <div class="sidebar-footer">
     <div class="hint">
-      <span class="hint-text">Ctrl+N 新建方案 | 双击编辑名称</span>
+      <span class="hint-text">Ctrl+N 新建分组 | 双击编辑名称</span>
+      <span class="hint-text">勾选后可与其他分组一起应用</span>
     </div>
   </div>
 </div>
@@ -200,12 +205,23 @@
     align-items: center;
     background: var(--editor-bg, #ffffff);
   }
+
+  .header-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
   
   .sidebar-header h2 {
     margin: 0;
     font-size: 16px;
     font-weight: 600;
     color: var(--text-primary, #213547);
+  }
+
+  .header-subtitle {
+    font-size: 11px;
+    color: var(--text-secondary, #8c8c8c);
   }
   
   .btn-new {
@@ -417,7 +433,7 @@
     background: transparent;
     color: var(--btn-icon-color, #666666);
     cursor: pointer;
-    opacity: 0;
+    opacity: 0.6;
     transition: all 0.2s;
     flex-shrink: 0;
     display: flex;
@@ -436,6 +452,11 @@
   .scheme-item:hover .btn-delete {
     opacity: 1;
     background: rgba(0, 0, 0, 0.1);
+  }
+  
+  :global(html.dark) .btn-edit,
+  :global(html.dark) .btn-delete {
+    opacity: 0.7;
   }
   
   :global(html.dark) .scheme-item:hover .btn-edit,
@@ -458,11 +479,13 @@
   .scheme-item.active .btn-edit,
   .scheme-item.active .btn-delete {
     color: rgba(255, 255, 255, 0.9);
+    opacity: 0.7;
   }
   
   .scheme-item.active:hover .btn-edit,
   .scheme-item.active:hover .btn-delete {
     background: rgba(255, 255, 255, 0.2);
+    opacity: 1;
   }
   
   .scheme-item.active .btn-edit:hover,
@@ -478,6 +501,7 @@
   }
   
   .hint-text {
+    display: block;
     font-size: 12px;
     color: var(--text-secondary, #8c8c8c);
     opacity: 0.7;
