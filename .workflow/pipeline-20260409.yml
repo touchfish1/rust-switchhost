@@ -21,7 +21,7 @@ stages:
         commands:
           - cargo --version
           - ''
-          - apt update && apt install -y node24
+          - apt update && apt install -y nodejs
           - ''
           - npm -v
           - ''
