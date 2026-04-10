@@ -4,8 +4,11 @@
   export let isOpen = false
   export let schemeName = ''
   export let logs: SyncLogEntry[] = []
+  export let onClose: (() => void) | undefined = undefined
 
-  export let onClose: () => void
+  function closeModal() {
+    onClose?.()
+  }
 
   function formatTrigger(trigger: string) {
     if (trigger === 'scheduled') return '定时同步'
@@ -17,8 +20,8 @@
 {#if isOpen}
   <div
     class="modal-overlay"
-    on:click|self={onClose}
-    on:keydown={(event) => event.key === 'Escape' && onClose()}
+    on:click|self={closeModal}
+    on:keydown={(event) => event.key === 'Escape' && closeModal()}
     role="dialog"
     aria-modal="true"
     aria-label="同步日志"
@@ -30,7 +33,7 @@
           <h3>同步日志</h3>
           <p>{schemeName}</p>
         </div>
-        <button class="close-btn" on:click={onClose} aria-label="关闭">×</button>
+        <button class="close-btn" on:click={closeModal} aria-label="关闭">×</button>
       </div>
 
       <div class="modal-body">

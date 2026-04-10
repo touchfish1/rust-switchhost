@@ -4,7 +4,7 @@
   import { listen, type UnlistenFn } from '@tauri-apps/api/event'
   import { open as openDialog, save } from '@tauri-apps/plugin-dialog'
   import { open } from '@tauri-apps/plugin-shell'
-  import { type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
+  import { type DownloadEvent } from '@tauri-apps/plugin-updater'
   import Sidebar from './components/Sidebar.svelte'
   import Editor from './components/Editor.svelte'
   import ThemeToggle from './components/ThemeToggle.svelte'
@@ -29,7 +29,7 @@
     updateSchemeRemoteConfig as updateSchemeRemoteConfigRequest
   } from '$lib/services/schemes'
   import { checkForUpdates } from '$lib/services/updater'
-  import type { Scheme, SyncLogEntry, UpdateInfo } from '$lib/types'
+  import type { Scheme, SyncLogEntry } from '$lib/types'
   import { appError, appVersion, hostsPermissionInfo, loadingFlags } from '$lib/stores/app'
   import {
     activeScheme as activeSchemeStore,
@@ -39,28 +39,22 @@
     removeScheme,
     schemes as schemesStore,
     selectScheme,
-    setEditorContent,
     setSchemes,
     upsertScheme
   } from '$lib/stores/schemes'
   import { theme } from '$lib/stores/theme'
   import { toasts } from '$lib/stores/toasts'
+  import { hasPendingUpdate, updater } from '$lib/stores/updater'
 
   let showCreateModal = false
   let showDeleteModal = false
   let showCurrentHostsModal = false
-  let showUpdateModal = false
   let showSyncLogModal = false
   let createModalMode: 'create' | 'edit-remote' = 'create'
   let remoteEditTarget: Scheme | null = null
   let deleteTargetId: string | null = null
   let currentHostsContent = ''
-  let updateInfo: UpdateInfo | null = null
-  let availableUpdate: Update | null = null
-  let isInstallingUpdate = false
   let isFlushingDns = false
-  let updateProgressText = ''
-  let hasPendingUpdate = false
   let updateCheckTimer: ReturnType<typeof setInterval> | null = null
   let isSyncingRemoteScheme = false
   let isCreatingScheme = false
@@ -193,16 +187,14 @@
       }
 
       const { releaseInfo, updaterUpdate } = await checkForUpdates()
-      updateInfo = releaseInfo
-      availableUpdate = updaterUpdate
-      hasPendingUpdate = !!(releaseInfo.has_update || updaterUpdate)
+      updater.setUpdateResult(releaseInfo, updaterUpdate)
 
       if (!silent) {
-        showUpdateModal = true
+        updater.setShowUpdateModal(true)
       }
 
-      if (!silent && updateInfo && !updateInfo.has_update) {
-        showToast(`当前已是最新版本 ${updateInfo.current_version}`, 'success')
+      if (!silent && !releaseInfo.has_update) {
+        showToast(`当前已是最新版本 ${releaseInfo.current_version}`, 'success')
       }
     } catch (e) {
       if (!silent) {
@@ -225,42 +217,42 @@
   }
 
   async function handleInstallUpdate() {
-    if (!availableUpdate) {
-      if (updateInfo?.download_url) {
-        await openUpdateUrl(updateInfo.download_url)
-      } else if (updateInfo?.html_url) {
-        await openUpdateUrl(updateInfo.html_url)
+    const currentUpdater = get(updater)
+
+    if (!currentUpdater.availableUpdate) {
+      if (currentUpdater.updateInfo?.download_url) {
+        await openUpdateUrl(currentUpdater.updateInfo.download_url)
+      } else if (currentUpdater.updateInfo?.html_url) {
+        await openUpdateUrl(currentUpdater.updateInfo.html_url)
       }
       return
     }
 
     try {
-      isInstallingUpdate = true
+      updater.startInstall()
       appError.set(null)
-      updateProgressText = '正在准备下载更新...'
 
-      await availableUpdate.downloadAndInstall((event: DownloadEvent) => {
+      await currentUpdater.availableUpdate.downloadAndInstall((event: DownloadEvent) => {
         if (event.event === 'Started') {
           const total = event.data.contentLength
-          updateProgressText = total
+          updater.setProgress(total
             ? `开始下载更新，总大小 ${(total / 1024 / 1024).toFixed(2)} MB`
-            : '开始下载更新'
+            : '开始下载更新')
         } else if (event.event === 'Progress') {
-          updateProgressText = `正在下载更新，已接收 ${(event.data.chunkLength / 1024).toFixed(1)} KB 数据块`
+          updater.setProgress(`正在下载更新，已接收 ${(event.data.chunkLength / 1024).toFixed(1)} KB 数据块`)
         } else if (event.event === 'Finished') {
-          updateProgressText = '下载完成，正在安装更新...'
+          updater.setProgress('下载完成，正在安装更新...')
         }
       })
 
-      updateProgressText = '安装完成，应用即将重启...'
-      hasPendingUpdate = false
+      updater.setProgress('安装完成，应用即将重启...')
       await restartApp()
     } catch (e) {
       appError.set(`安装更新失败: ${e}`)
       console.error('Failed to install update:', e)
-      updateProgressText = ''
+      updater.clearProgress()
     } finally {
-      isInstallingUpdate = false
+      updater.finishInstall()
     }
   }
 
@@ -608,7 +600,7 @@
     <div class="header-actions">
       <button
         class="btn-secondary update-trigger"
-        class:has-notification={hasPendingUpdate}
+        class:has-notification={$hasPendingUpdate}
         on:click={handleCheckUpdates}
         disabled={$loadingFlags.updateCheck}
       >
@@ -764,15 +756,15 @@
     onClose={() => { showCurrentHostsModal = false }}
   />
 
-  {#if updateInfo}
+  {#if $updater.updateInfo}
     <UpdateModal
-      isOpen={showUpdateModal}
-      {updateInfo}
-      {availableUpdate}
-      {isInstallingUpdate}
-      {updateProgressText}
+      isOpen={$updater.showUpdateModal}
+      updateInfo={$updater.updateInfo}
+      availableUpdate={$updater.availableUpdate}
+      isInstallingUpdate={$updater.isInstallingUpdate}
+      updateProgressText={$updater.updateProgressText}
       {formatPublishedAt}
-      onClose={() => { showUpdateModal = false }}
+      onClose={() => { updater.setShowUpdateModal(false) }}
       onOpenUrl={openUpdateUrl}
       onInstall={handleInstallUpdate}
     />

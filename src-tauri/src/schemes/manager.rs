@@ -19,6 +19,9 @@ pub struct DueSyncJob {
     pub trigger: String,
 }
 
+const MIN_BACKGROUND_SYNC_WAIT_SECS: u64 = 5;
+const MAX_BACKGROUND_SYNC_WAIT_SECS: u64 = 60;
+
 impl SchemeManager {
     const MAX_SYNC_LOGS: usize = 50;
 
@@ -108,12 +111,14 @@ impl SchemeManager {
                 }
 
                 if let Some(next_retry_at) = scheme.next_retry_at {
-                    if next_retry_at <= now {
-                        return Some(DueSyncJob {
+                    return if next_retry_at <= now {
+                        Some(DueSyncJob {
                             id: scheme.id.clone(),
                             trigger: "retry".to_string(),
-                        });
-                    }
+                        })
+                    } else {
+                        None
+                    };
                 }
 
                 let last_synced_at = scheme
@@ -131,6 +136,10 @@ impl SchemeManager {
                 None
             })
             .collect()
+    }
+
+    pub fn get_next_sync_wait_duration(&self) -> std::time::Duration {
+        self.get_next_sync_wait_duration_from(Utc::now())
     }
 
     pub fn create_scheme(&mut self, name: String, content: String) -> io::Result<Scheme> {
@@ -599,6 +608,54 @@ impl SchemeManager {
         }
     }
 
+    fn get_next_sync_wait_duration_from(&self, now: DateTime<Utc>) -> std::time::Duration {
+        let minimum = std::time::Duration::from_secs(MIN_BACKGROUND_SYNC_WAIT_SECS);
+        let maximum = std::time::Duration::from_secs(MAX_BACKGROUND_SYNC_WAIT_SECS);
+
+        let next_due_at = self
+            .config
+            .schemes
+            .iter()
+            .filter_map(|scheme| self.next_due_at_for_scheme(scheme, now))
+            .min();
+
+        let Some(next_due_at) = next_due_at else {
+            return maximum;
+        };
+
+        if next_due_at <= now {
+            return minimum;
+        }
+
+        let until_due = (next_due_at - now)
+            .to_std()
+            .unwrap_or(minimum);
+
+        until_due.clamp(minimum, maximum)
+    }
+
+    fn next_due_at_for_scheme(&self, scheme: &Scheme, _now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        let remote_url = scheme.remote_url.as_ref()?.trim();
+        let interval = scheme.sync_interval_minutes?;
+        if !scheme.auto_sync_enabled || remote_url.is_empty() || interval == 0 {
+            return None;
+        }
+
+        if scheme.sync_status == "syncing" {
+            return None;
+        }
+
+        if let Some(next_retry_at) = scheme.next_retry_at {
+            return Some(next_retry_at);
+        }
+
+        let last_synced_at = scheme
+            .last_synced_at
+            .unwrap_or_else(|| DateTime::<Utc>::from(std::time::SystemTime::UNIX_EPOCH));
+
+        Some(last_synced_at + Duration::minutes(interval as i64))
+    }
+
     fn get_config_dir() -> io::Result<PathBuf> {
         match dirs::config_dir() {
             Some(dir) => Ok(dir.join("rust-switchhost")),
@@ -618,7 +675,10 @@ impl Default for SchemeManager {
 
 #[cfg(test)]
 mod tests {
-    use super::SchemeManager;
+    use super::{SchemeManager, MAX_BACKGROUND_SYNC_WAIT_SECS, MIN_BACKGROUND_SYNC_WAIT_SECS};
+    use crate::schemes::{Scheme, SchemeConfig};
+    use chrono::{Duration, Utc};
+    use std::path::PathBuf;
 
     #[test]
     fn calculates_retry_delay_with_backoff() {
@@ -627,5 +687,37 @@ mod tests {
         assert_eq!(SchemeManager::retry_delay_minutes(2), 2);
         assert_eq!(SchemeManager::retry_delay_minutes(3), 5);
         assert_eq!(SchemeManager::retry_delay_minutes(8), 10);
+    }
+
+    #[test]
+    fn next_sync_wait_duration_uses_nearest_due_scheme() {
+        let now = Utc::now();
+        let mut manager = SchemeManager {
+            config: SchemeConfig::default(),
+            config_path: PathBuf::new(),
+            sync_log_path: PathBuf::new(),
+        };
+
+        let mut scheme = Scheme::new("remote".to_string(), "127.0.0.1 example.test".to_string());
+        scheme.remote_url = Some("https://example.com/hosts".to_string());
+        scheme.auto_sync_enabled = true;
+        scheme.sync_interval_minutes = Some(15);
+        scheme.last_synced_at = Some(now - Duration::minutes(14) - Duration::seconds(56));
+        manager.config.schemes.push(scheme);
+
+        let wait = manager.get_next_sync_wait_duration_from(now);
+        assert_eq!(wait.as_secs(), MIN_BACKGROUND_SYNC_WAIT_SECS);
+    }
+
+    #[test]
+    fn next_sync_wait_duration_caps_idle_wait() {
+        let manager = SchemeManager {
+            config: SchemeConfig::default(),
+            config_path: PathBuf::new(),
+            sync_log_path: PathBuf::new(),
+        };
+
+        let wait = manager.get_next_sync_wait_duration_from(Utc::now());
+        assert_eq!(wait.as_secs(), MAX_BACKGROUND_SYNC_WAIT_SECS);
     }
 }

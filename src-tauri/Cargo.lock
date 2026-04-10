@@ -3125,7 +3125,7 @@ dependencies = [
 
 [[package]]
 name = "rust-switchhost"
-version = "0.0.25"
+version = "0.0.26"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -3138,6 +3138,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-shell",
  "tauri-plugin-updater",
+ "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]

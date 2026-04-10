@@ -1,4 +1,5 @@
 mod commands;
+mod error;
 mod hosts;
 mod schemes;
 mod tray;
@@ -8,8 +9,6 @@ use commands::schemes::AppState;
 use schemes::SchemeManager;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, WindowEvent};
-
-const BACKGROUND_SYNC_INTERVAL_SECS: u64 = 30;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -69,20 +68,26 @@ pub fn run() {
 fn start_background_sync(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
-            let due_jobs = {
+            let (due_jobs, wait_duration) = {
                 let state = app.state::<AppState>();
-                let jobs = match state.scheme_manager.lock() {
-                    Ok(manager) => manager.get_due_sync_jobs(),
-                    Err(_) => Vec::new(),
+                let next_cycle = match state.scheme_manager.lock() {
+                    Ok(manager) => (
+                        manager.get_due_sync_jobs(),
+                        manager.get_next_sync_wait_duration(),
+                    ),
+                    Err(_) => (
+                        Vec::new(),
+                        std::time::Duration::from_secs(30),
+                    ),
                 };
-                jobs
+                next_cycle
             };
 
             for job in due_jobs {
                 let _ = commands::schemes::perform_remote_sync(&app, job.id, job.trigger).await;
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(BACKGROUND_SYNC_INTERVAL_SECS)).await;
+            tokio::time::sleep(wait_duration).await;
         }
     });
 }

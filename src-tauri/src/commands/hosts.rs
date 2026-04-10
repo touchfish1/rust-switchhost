@@ -1,3 +1,4 @@
+use crate::error::{AppResult, IntoCommandResult};
 use crate::hosts;
 use crate::validation::validate_hosts_content;
 use serde::Serialize;
@@ -19,13 +20,12 @@ pub struct DnsFlushResult {
 
 #[tauri::command]
 pub fn get_hosts_content() -> Result<String, String> {
-    hosts::read_hosts_file().map_err(|e| e.to_string())
+    get_hosts_content_impl().into_command_result()
 }
 
 #[tauri::command]
 pub fn write_hosts_content(content: String) -> Result<(), String> {
-    validate_hosts_content(&content)?;
-    hosts::write_hosts_file(&content).map_err(|e| e.to_string())
+    write_hosts_content_impl(content).into_command_result()
 }
 
 #[tauri::command]
@@ -76,4 +76,13 @@ pub fn check_hosts_permission() -> HostsPermissionInfo {
         platform,
         message,
     }
+}
+
+fn get_hosts_content_impl() -> AppResult<String> {
+    Ok(hosts::read_hosts_file()?)
+}
+
+fn write_hosts_content_impl(content: String) -> AppResult<()> {
+    validate_hosts_content(&content)?;
+    Ok(hosts::write_hosts_file(&content)?)
 }

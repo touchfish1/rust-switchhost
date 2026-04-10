@@ -1,3 +1,4 @@
+use crate::error::{AppError, AppResult, IntoCommandResult};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
@@ -34,22 +35,26 @@ struct GithubAsset {
 
 #[tauri::command]
 pub async fn check_for_updates(app: AppHandle) -> Result<UpdateInfo, String> {
+    check_for_updates_impl(app).await.into_command_result()
+}
+
+async fn check_for_updates_impl(app: AppHandle) -> AppResult<UpdateInfo> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .user_agent("rust-switchhost-update-checker")
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        .map_err(|error| AppError::network(format!("创建 HTTP 客户端失败: {}", error)))?;
 
     let release = client
         .get(GITHUB_LATEST_RELEASE_API)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch latest release: {}", e))?
+        .map_err(|error| AppError::network(format!("拉取最新版本信息失败: {}", error)))?
         .error_for_status()
-        .map_err(|e| format!("GitHub release API error: {}", e))?
+        .map_err(|error| AppError::network(format!("更新源返回异常状态: {}", error)))?
         .json::<GithubRelease>()
         .await
-        .map_err(|e| format!("Failed to parse latest release: {}", e))?;
+        .map_err(|error| AppError::config(format!("解析最新版本信息失败: {}", error)))?;
 
     let current_version = app.package_info().version.to_string();
     let latest_version = normalize_version(&release.tag_name);
