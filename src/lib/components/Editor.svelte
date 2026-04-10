@@ -1,24 +1,31 @@
+<svelte:options runes={true} />
+
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { createEventDispatcher } from 'svelte'
   import { EditorView, lineNumbers, highlightActiveLine, highlightActiveLineGutter, Decoration, ViewPlugin, ViewUpdate, keymap } from '@codemirror/view'
   import { EditorState, Compartment, RangeSetBuilder, RangeSet, Prec } from '@codemirror/state'
-  import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-  import { oneDark } from '@codemirror/theme-one-dark'
-  
+  import { history } from '@codemirror/commands'
+
   type DecorationSet = RangeSet<Decoration>
-  
-  export let content: string = ''
-  export let readOnly: boolean = false
-  
-  const dispatch = createEventDispatcher()
-  
-  let editorContainer: HTMLDivElement
-  let view: EditorView | null = null
+
+  type EditorProps = {
+    content?: string
+    readOnly?: boolean
+    onChange?: (detail: { content: string }) => void
+  }
+
+  let {
+    content = '',
+    readOnly = false,
+    onChange = () => {}
+  }: EditorProps = $props()
+
+  let editorContainer = $state<HTMLDivElement | undefined>(undefined)
+  let view = $state<EditorView | null>(null)
   let themeCompartment = new Compartment()
   let readOnlyCompartment = new Compartment()
-  let fontSize = 14
-  let isDarkMode = false
+  let fontSize = $state(14)
+  let isDarkMode = $state(false)
   
   const ipDecoration = Decoration.mark({ class: 'cm-ip' })
   const invalidIpDecoration = Decoration.mark({ class: 'cm-ip-invalid' })
@@ -134,7 +141,7 @@
       },
       '.cm-content': {
         caretColor: 'var(--text-primary, #213547)',
-        fontFamily: "'Microsoft YaHei', 'PingFang SC', 'SimSun', 'Consolas', 'Monaco', monospace",
+        fontFamily: 'var(--font-family)',
         fontSize: `${size}px`,
         lineHeight: '1.6',
         padding: '0 16px'
@@ -147,7 +154,7 @@
         color: 'var(--text-secondary, #8c8c8c)',
         border: 'none',
         borderRight: '1px solid var(--border-color, #e0e0e0)',
-        fontFamily: "'Microsoft YaHei', 'PingFang SC', sans-serif"
+        fontFamily: 'var(--font-family)'
       },
       '.cm-activeLineGutter': {
         backgroundColor: 'var(--hover-bg, #e6f7ff)'
@@ -191,7 +198,7 @@
       },
       '.cm-content': {
         caretColor: 'var(--text-primary, #f0f0f0)',
-        fontFamily: "'Microsoft YaHei', 'PingFang SC', 'SimSun', 'Consolas', 'Monaco', monospace",
+        fontFamily: 'var(--font-family)',
         fontSize: `${size}px`,
         lineHeight: '1.6',
         padding: '0 16px'
@@ -204,7 +211,7 @@
         color: 'var(--text-secondary, #a0a0a0)',
         border: 'none',
         borderRight: '1px solid var(--border-color, #3a3a3a)',
-        fontFamily: "'Microsoft YaHei', 'PingFang SC', sans-serif"
+        fontFamily: 'var(--font-family)'
       },
       '.cm-activeLineGutter': {
         backgroundColor: 'var(--hover-bg, #2a2d2e)'
@@ -270,7 +277,7 @@
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         content = update.state.doc.toString()
-        dispatch('change', { content })
+        onChange({ content })
       }
     })
     
@@ -365,20 +372,24 @@
       view.destroy()
     }
   })
-  
-  $: if (view && content !== view.state.doc.toString()) {
-    view.dispatch({
-      changes: {
-        from: 0,
-        to: view.state.doc.length,
-        insert: content
-      }
-    })
-  }
-  
-  $: if (view) {
-    updateReadOnly(readOnly)
-  }
+
+  $effect(() => {
+    if (view && content !== view.state.doc.toString()) {
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: view.state.doc.length,
+          insert: content
+        }
+      })
+    }
+  })
+
+  $effect(() => {
+    if (view) {
+      updateReadOnly(readOnly)
+    }
+  })
 </script>
 
 <div class="editor-container" bind:this={editorContainer}>
@@ -404,6 +415,6 @@
     opacity: 0.6;
     pointer-events: none;
     z-index: 10;
-    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+    font-family: var(--font-family);
   }
 </style>

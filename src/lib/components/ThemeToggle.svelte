@@ -1,18 +1,24 @@
+<svelte:options runes={true} />
+
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte'
-  
-  export let isDark: boolean = false
-  
-  const dispatch = createEventDispatcher()
-  
+  type ThemeToggleProps = {
+    isDark?: boolean
+    onToggle?: (detail: { isDark: boolean }) => void
+  }
+
+  let {
+    isDark = false,
+    onToggle = () => {}
+  }: ThemeToggleProps = $props()
+
   function toggleTheme() {
-    dispatch('toggle', { isDark: !isDark })
+    onToggle({ isDark: !isDark })
   }
 </script>
 
 <button
   class="theme-toggle"
-  on:click={toggleTheme}
+  onclick={toggleTheme}
   title={isDark ? '切换到浅色主题' : '切换到深色主题'}
 >
   {#if isDark}

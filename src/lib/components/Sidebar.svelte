@@ -1,32 +1,59 @@
+<svelte:options runes={true} />
+
 <script lang="ts">
-  import { createEventDispatcher, onMount, onDestroy } from 'svelte'
-  
-  export let schemes: any[] = []
-  export let activeSchemeId: string | null = null
-  export let width = 320
-  
-  const dispatch = createEventDispatcher()
-  
-  let editingId: string | null = null
-  let editingName = ''
-  let editInput: HTMLInputElement | null = null
-  let isResizing = false
-  let startX = 0
-  let startWidth = width
+  import { onMount, onDestroy } from 'svelte'
+  import type { Scheme } from '$lib/types'
+
+  type SidebarProps = {
+    schemes?: Scheme[]
+    activeSchemeId?: string | null
+    width?: number
+    onSelect?: (detail: { id: string }) => void
+    onCreate?: () => void
+    onImport?: () => void
+    onExport?: () => void
+    onDelete?: (detail: { id: string }) => void
+    onEditRemote?: (detail: { id: string }) => void
+    onRename?: (detail: { id: string; name: string }) => void
+    onToggle?: (detail: { id: string; enabled: boolean }) => void
+    onResize?: (detail: { width: number }) => void
+  }
+
+  let {
+    schemes = [],
+    activeSchemeId = null,
+    width = 320,
+    onSelect = () => {},
+    onCreate = () => {},
+    onImport = () => {},
+    onExport = () => {},
+    onDelete = () => {},
+    onEditRemote = () => {},
+    onRename = () => {},
+    onToggle = () => {},
+    onResize = () => {}
+  }: SidebarProps = $props()
+
+  let editingId = $state<string | null>(null)
+  let editingName = $state('')
+  let editInput = $state<HTMLInputElement | null>(null)
+  let isResizing = $state(false)
+  let startX = $state(0)
+  let startWidth = $state(320)
   
   function selectScheme(id: string) {
     if (editingId === id) return
-    dispatch('select', { id })
+    onSelect({ id })
   }
   
   function createNewScheme() {
-    dispatch('create')
+    onCreate()
   }
 
   function handleResizeMove(event: MouseEvent) {
     if (!isResizing) return
     const nextWidth = Math.min(520, Math.max(280, startWidth + event.clientX - startX))
-    dispatch('resize', { width: nextWidth })
+    onResize({ width: nextWidth })
   }
 
   function stopResize() {
@@ -51,28 +78,28 @@
 
   function importSchemes(event: Event) {
     event.stopPropagation()
-    dispatch('import')
+    onImport()
   }
 
   function exportSchemes(event: Event) {
     event.stopPropagation()
-    dispatch('export')
+    onExport()
   }
   
   function deleteScheme(id: string, event: Event) {
     event.stopPropagation()
-    dispatch('delete', { id })
+    onDelete({ id })
   }
 
   function editRemoteScheme(id: string, event: Event) {
     event.stopPropagation()
-    dispatch('editRemote', { id })
+    onEditRemote({ id })
   }
   
   function toggleScheme(id: string, event: Event) {
     event.stopPropagation()
     const target = event.currentTarget as HTMLInputElement
-    dispatch('toggle', { id, enabled: target.checked })
+    onToggle({ id, enabled: target.checked })
   }
   
   function startEdit(id: string, name: string, event: Event) {
@@ -92,7 +119,7 @@
   function saveEdit(id: string) {
     const trimmedName = editingName.trim()
     if (trimmedName) {
-      dispatch('rename', { id, name: trimmedName })
+      onRename({ id, name: trimmedName })
     }
     editingId = null
     editingName = ''
@@ -141,7 +168,7 @@
       <div class="toolbar-group">
         <button 
           class="btn-new" 
-          on:click={createNewScheme} 
+          onclick={createNewScheme} 
           title="新建分组 (Ctrl+N)"
         >
           <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
@@ -153,7 +180,7 @@
       <div class="toolbar-group toolbar-group-muted">
         <button
           class="btn-toolbar"
-          on:click={importSchemes}
+          onclick={importSchemes}
           title="导入分组"
           aria-label="导入分组"
         >
@@ -165,7 +192,7 @@
         </button>
         <button
           class="btn-toolbar"
-          on:click={exportSchemes}
+          onclick={exportSchemes}
           title="导出分组"
           aria-label="导出分组"
         >
@@ -184,7 +211,7 @@
       <div class="empty-state">
         <div class="empty-icon">📋</div>
         <p>暂无分组</p>
-        <button class="btn-create" on:click={createNewScheme}>
+        <button class="btn-create" onclick={createNewScheme}>
           创建第一个分组
         </button>
       </div>
@@ -194,9 +221,9 @@
           class="scheme-item"
           class:active={scheme.id === activeSchemeId}
           class:editing={editingId === scheme.id}
-          on:click={() => selectScheme(scheme.id)}
-          on:dblclick={(e) => startEditByDoubleClick(scheme.id, scheme.name, e)}
-          on:keydown={(e) => e.key === 'Enter' && selectScheme(scheme.id)}
+          onclick={() => selectScheme(scheme.id)}
+          ondblclick={(e) => startEditByDoubleClick(scheme.id, scheme.name, e)}
+          onkeydown={(e) => e.key === 'Enter' && selectScheme(scheme.id)}
           role="button"
           tabindex="0"
         >
@@ -207,9 +234,9 @@
                 type="text"
                 class="edit-input"
                 bind:value={editingName}
-                on:keydown={handleEditKeydown}
-                on:blur={() => saveEdit(scheme.id)}
-                on:click|stopPropagation
+                onkeydown={handleEditKeydown}
+                onblur={() => saveEdit(scheme.id)}
+                onclick={(event) => event.stopPropagation()}
               />
             {:else}
               <span class="scheme-name" title="双击编辑名称">{scheme.name}</span>
@@ -225,14 +252,14 @@
                 <input 
                   type="checkbox" 
                   checked={scheme.enabled}
-                  on:change={(e) => toggleScheme(scheme.id, e)}
+                  onchange={(e) => toggleScheme(scheme.id, e)}
                 />
                 <span class="slider"></span>
               </label>
               
               <button
                 class="btn-edit"
-                on:click={(e) => scheme.remote_url ? editRemoteScheme(scheme.id, e) : startEdit(scheme.id, scheme.name, e)}
+                onclick={(e) => scheme.remote_url ? editRemoteScheme(scheme.id, e) : startEdit(scheme.id, scheme.name, e)}
                 title={scheme.remote_url ? '编辑远程配置' : '编辑名称'}
                 aria-label={scheme.remote_url ? '编辑远程配置' : '编辑名称'}
               >
@@ -244,7 +271,7 @@
               
               <button
                 class="btn-delete"
-                on:click={(e) => deleteScheme(scheme.id, e)}
+                onclick={(e) => deleteScheme(scheme.id, e)}
                 title="删除分组"
                 aria-label="删除分组"
               >
@@ -272,7 +299,7 @@
 
   <button
     class="resize-handle"
-    on:mousedown={startResize}
+    onmousedown={startResize}
     type="button"
     aria-label="调整分组列表宽度"
   ></button>

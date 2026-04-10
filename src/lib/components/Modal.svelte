@@ -1,39 +1,52 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte'
   import { onMount } from 'svelte'
-  
-  export let title: string = ''
-  export let confirmText: string = '确定'
-  export let cancelText: string = '取消'
-  export let showCancel: boolean = true
-  export let type: 'default' | 'danger' = 'default'
-  export let inputValue: string = ''
-  
-  const dispatch = createEventDispatcher()
-  
+
+  type ModalProps = {
+    title?: string
+    confirmText?: string
+    cancelText?: string
+    showCancel?: boolean
+    type?: 'default' | 'danger'
+    inputValue?: string
+    onConfirm?: (detail: { value: string }) => void
+    onCancel?: () => void
+    onClose?: () => void
+  }
+
+  export let title: ModalProps['title'] = ''
+  export let confirmText: ModalProps['confirmText'] = '确定'
+  export let cancelText: ModalProps['cancelText'] = '取消'
+  export let showCancel: ModalProps['showCancel'] = true
+  export let type: ModalProps['type'] = 'default'
+  export let inputValue: ModalProps['inputValue'] = ''
+  export let onConfirm: NonNullable<ModalProps['onConfirm']> = () => {}
+  export let onCancel: NonNullable<ModalProps['onCancel']> = () => {}
+  export let onClose: NonNullable<ModalProps['onClose']> = () => {}
+
   let showModal = false
-  
+  let localInputValue = inputValue
+
   onMount(() => {
     showModal = true
   })
-  
+
   function handleConfirm() {
-    dispatch('confirm', { value: inputValue })
+    onConfirm({ value: localInputValue })
     closeModal()
   }
-  
+
   function handleCancel() {
-    dispatch('cancel')
+    onCancel()
     closeModal()
   }
-  
+
   function closeModal() {
     showModal = false
     setTimeout(() => {
-      dispatch('close')
+      onClose()
     }, 200)
   }
-  
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
       handleCancel()
@@ -43,13 +56,13 @@
   }
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} />
 
 {#if showModal}
   <div
     class="modal-overlay"
-    on:click|self={handleCancel}
-    on:keydown={(e) => e.key === 'Escape' && handleCancel()}
+    onclick={(e) => e.target === e.currentTarget && handleCancel()}
+    onkeydown={(e) => e.key === 'Escape' && handleCancel()}
     role="dialog"
     aria-modal="true"
     tabindex="0"
@@ -57,7 +70,7 @@
     <div class="modal-container" class:danger={type === 'danger'} role="document">
       <div class="modal-header">
         <h3>{title}</h3>
-        <button class="close-btn" on:click={handleCancel} aria-label="关闭">×</button>
+        <button class="close-btn" onclick={handleCancel} aria-label="关闭">×</button>
       </div>
       
       <div class="modal-body">
@@ -65,10 +78,10 @@
           {#if type === 'default'}
             <input
               type="text"
-              bind:value={inputValue}
               placeholder="请输入..."
               class="modal-input"
-              on:keydown={(e) => e.key === 'Enter' && handleConfirm()}
+              bind:value={localInputValue}
+              onkeydown={(e) => e.key === 'Enter' && handleConfirm()}
             />
           {:else}
             <p class="confirm-text">此操作不可撤销，确定要继续吗？</p>
@@ -78,7 +91,7 @@
       
       <div class="modal-footer">
         {#if showCancel}
-          <button class="btn btn-default" on:click={handleCancel}>
+          <button class="btn btn-default" onclick={handleCancel}>
             {cancelText}
           </button>
         {/if}
@@ -86,7 +99,7 @@
           class="btn" 
           class:btn-primary={type === 'default'}
           class:btn-danger={type === 'danger'}
-          on:click={handleConfirm}
+          onclick={handleConfirm}
         >
           {confirmText}
         </button>

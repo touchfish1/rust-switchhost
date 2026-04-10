@@ -1,5 +1,5 @@
 use reqwest::Url;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
 pub fn validate_remote_url(value: &str) -> Result<(), String> {
@@ -14,8 +14,12 @@ pub fn validate_remote_url(value: &str) -> Result<(), String> {
         _ => return Err("远程 URL 仅支持 http 或 https 协议".to_string()),
     }
 
-    if url.host_str().is_none() {
-        return Err("远程 URL 必须包含有效主机名".to_string());
+    let host = url
+        .host_str()
+        .ok_or_else(|| "远程 URL 必须包含有效主机名".to_string())?;
+
+    if is_private_host(host) {
+        return Err("远程 URL 不能指向本机、内网或链路本地地址".to_string());
     }
 
     Ok(())
@@ -87,6 +91,32 @@ fn is_valid_label_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_'
 }
 
+fn is_private_host(host: &str) -> bool {
+    let normalized = host.trim_matches(['[', ']']);
+
+    if normalized.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    match IpAddr::from_str(normalized) {
+        Ok(IpAddr::V4(ip)) => is_private_ipv4(ip),
+        Ok(IpAddr::V6(ip)) => is_private_ipv6(ip),
+        Err(_) => false,
+    }
+}
+
+fn is_private_ipv4(ip: Ipv4Addr) -> bool {
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+}
+
+fn is_private_ipv6(ip: Ipv6Addr) -> bool {
+    ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local() || ip.is_unspecified()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{validate_hosts_content, validate_remote_url};
@@ -94,9 +124,20 @@ mod tests {
     #[test]
     fn validates_remote_urls() {
         assert!(validate_remote_url("https://example.com/hosts.txt").is_ok());
-        assert!(validate_remote_url("http://127.0.0.1:8080/hosts").is_ok());
+        assert!(validate_remote_url("https://raw.githubusercontent.com/example/hosts.txt").is_ok());
         assert!(validate_remote_url("ftp://example.com/file").is_err());
         assert!(validate_remote_url("not-a-url").is_err());
+    }
+
+    #[test]
+    fn rejects_private_remote_urls() {
+        assert!(validate_remote_url("http://127.0.0.1:8080/hosts").is_err());
+        assert!(validate_remote_url("http://10.0.0.12/hosts").is_err());
+        assert!(validate_remote_url("http://172.16.10.5/hosts").is_err());
+        assert!(validate_remote_url("http://192.168.1.2/hosts").is_err());
+        assert!(validate_remote_url("http://169.254.169.254/latest/meta-data").is_err());
+        assert!(validate_remote_url("http://[::1]/hosts").is_err());
+        assert!(validate_remote_url("http://localhost/hosts").is_err());
     }
 
     #[test]

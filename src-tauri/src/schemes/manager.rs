@@ -171,7 +171,6 @@ impl SchemeManager {
             .unwrap_or(false);
 
         self.config.schemes.retain(|s| s.id != id);
-        self.config.active_scheme_ids.retain(|s| s != id);
         for ids in self.config.active_scheme_ids_by_platform.values_mut() {
             ids.retain(|scheme_id| scheme_id != id);
         }
@@ -197,8 +196,7 @@ impl SchemeManager {
 
         self.config
             .active_scheme_ids_by_platform
-            .insert(platform, active_ids.clone());
-        self.config.active_scheme_ids = active_ids;
+            .insert(platform, active_ids);
         self.apply_active_schemes_for_current_platform()?;
         self.sync_enabled_flags();
         self.save_config()
@@ -220,13 +218,10 @@ impl SchemeManager {
             if !ids.iter().any(|scheme_id| scheme_id == id) {
                 ids.push(id.to_string());
             }
-
-            self.config.active_scheme_ids = ids.clone();
         } else {
             let platform = Self::current_platform();
             if let Some(ids) = self.config.active_scheme_ids_by_platform.get_mut(&platform) {
                 ids.retain(|scheme_id| scheme_id != id);
-                self.config.active_scheme_ids = ids.clone();
             }
         }
 
@@ -417,13 +412,7 @@ impl SchemeManager {
         }
 
         let content = serde_json::to_string_pretty(&config_to_save)?;
-        match fs::write(&self.config_path, &content) {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                eprintln!("Warning: Failed to save config: {}", e);
-                Ok(())
-            }
-        }
+        fs::write(&self.config_path, &content)
     }
 
     fn load_sync_logs_from(path: &PathBuf) -> io::Result<HashMap<String, Vec<SyncLogEntry>>> {
@@ -466,6 +455,20 @@ impl SchemeManager {
 
     fn migrate_legacy_platform_state(&mut self) {
         let platform = Self::current_platform();
+        let already_migrated = self
+            .config
+            .version
+            .split('.')
+            .next()
+            .and_then(|major| major.parse::<u64>().ok())
+            .map(|major| major >= 2)
+            .unwrap_or(false);
+
+        if already_migrated {
+            self.sync_enabled_flags();
+            return;
+        }
+
         let needs_migration = self
             .config
             .active_scheme_ids_by_platform
@@ -477,6 +480,7 @@ impl SchemeManager {
             self.config
                 .active_scheme_ids_by_platform
                 .insert(platform, self.config.active_scheme_ids.clone());
+            self.config.version = "2.0".to_string();
         }
 
         self.sync_enabled_flags();

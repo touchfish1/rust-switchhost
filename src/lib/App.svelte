@@ -1,70 +1,51 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte'
-  import { getVersion } from '@tauri-apps/api/app'
-  import { invoke } from '@tauri-apps/api/core'
+  import { get } from 'svelte/store'
   import { listen, type UnlistenFn } from '@tauri-apps/api/event'
   import { open as openDialog, save } from '@tauri-apps/plugin-dialog'
   import { open } from '@tauri-apps/plugin-shell'
-  import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
+  import { type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
   import Sidebar from './components/Sidebar.svelte'
   import Editor from './components/Editor.svelte'
   import ThemeToggle from './components/ThemeToggle.svelte'
   import Modal from './components/Modal.svelte'
   import CreateSchemeModal from './components/CreateSchemeModal.svelte'
   import SyncLogModal from './components/SyncLogModal.svelte'
-  
-  interface Scheme {
-    id: string
-    name: string
-    content: string
-    remote_url?: string | null
-    auto_sync_enabled?: boolean
-    sync_interval_minutes?: number | null
-    last_synced_at?: string | null
-    last_sync_error?: string | null
-    sync_status?: string
-    last_sync_message?: string | null
-    next_retry_at?: string | null
-    consecutive_failures?: number
-    enabled: boolean
-    created_at: string
-    updated_at: string
-  }
+  import CurrentHostsModal from './components/CurrentHostsModal.svelte'
+  import UpdateModal from './components/UpdateModal.svelte'
+  import Toast from './components/Toast.svelte'
+  import { getAppVersion, restartApp } from '$lib/services/app'
+  import { checkHostsPermission as fetchHostsPermission, flushDnsCache, getHostsContent } from '$lib/services/hosts'
+  import {
+    getAllSchemes,
+    createScheme as createSchemeRequest,
+    deleteScheme as deleteSchemeRequest,
+    exportSchemes as exportSchemesRequest,
+    getSchemeSyncLogs,
+    importSchemes as importSchemesRequest,
+    setSchemeEnabled as setSchemeEnabledRequest,
+    syncRemoteScheme,
+    updateScheme as updateSchemeRequest,
+    updateSchemeRemoteConfig as updateSchemeRemoteConfigRequest
+  } from '$lib/services/schemes'
+  import { checkForUpdates } from '$lib/services/updater'
+  import type { Scheme, SyncLogEntry, UpdateInfo } from '$lib/types'
+  import { appError, appVersion, hostsPermissionInfo, loadingFlags } from '$lib/stores/app'
+  import {
+    activeScheme as activeSchemeStore,
+    activeSchemeId as activeSchemeIdStore,
+    applyUpdatedScheme as applyUpdatedSchemeStore,
+    editorContent as editorContentStore,
+    removeScheme,
+    schemes as schemesStore,
+    selectScheme,
+    setEditorContent,
+    setSchemes,
+    upsertScheme
+  } from '$lib/stores/schemes'
+  import { theme } from '$lib/stores/theme'
+  import { toasts } from '$lib/stores/toasts'
 
-  interface UpdateInfo {
-    current_version: string
-    latest_version: string
-    has_update: boolean
-    release_name: string
-    published_at: string
-    body: string
-    html_url: string
-    download_url: string | null
-  }
-
-  interface HostsPermissionInfo {
-    has_permission: boolean
-    hosts_path: string
-    platform: string
-    message: string
-  }
-
-  interface DnsFlushResult {
-    success: boolean
-    platform: string
-    message: string
-  }
-  
-  let schemes: Scheme[] = []
-  let activeSchemeId: string | null = null
-  let activeScheme: Scheme | null = null
-  let editorContent: string = ''
-  let isLoading = false
-  let error: string | null = null
-  let isDarkMode = false
-  let appVersion = ''
-  let hostsPermissionInfo: HostsPermissionInfo | null = null
-  
   let showCreateModal = false
   let showDeleteModal = false
   let showCurrentHostsModal = false
@@ -83,35 +64,40 @@
   let updateCheckTimer: ReturnType<typeof setInterval> | null = null
   let isSyncingRemoteScheme = false
   let isCreatingScheme = false
+  let isImportingSchemes = false
+  let isExportingSchemes = false
+  let isOpeningCurrentHosts = false
   let sidebarWidth = 320
-  let syncLogs: Array<{ timestamp: string; status: string; trigger: string; message: string }> = []
+  let syncLogs: SyncLogEntry[] = []
   let syncEventUnlisten: UnlistenFn | null = null
   const syncingSchemeIds = new Set<string>()
-  
+
   onMount(async () => {
-    const savedTheme = localStorage.getItem('theme')
     const savedSidebarWidth = localStorage.getItem('sidebar-width')
-    isDarkMode = savedTheme === 'dark' || 
-      (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    theme.initialize()
     sidebarWidth = savedSidebarWidth ? Math.min(520, Math.max(280, Number(savedSidebarWidth) || 320)) : 320
-    updateTheme()
+    loadingFlags.start('initial')
 
-    await Promise.all([
-      loadAppVersion(),
-      loadSchemes(),
-      checkHostsPermission()
-    ])
+    try {
+      await Promise.all([
+        loadAppVersion(),
+        loadSchemes(),
+        checkHostsPermission()
+      ])
 
-    await checkForUpdatesSilently()
-    updateCheckTimer = setInterval(() => {
-      void checkForUpdatesSilently()
-    }, 15 * 60 * 1000)
-    syncEventUnlisten = await listen('schemes-changed', async () => {
-      await loadSchemes()
-      if (showSyncLogModal && activeSchemeId) {
-        await loadSyncLogs(activeSchemeId)
-      }
-    })
+      await checkForUpdatesSilently()
+      updateCheckTimer = setInterval(() => {
+        void checkForUpdatesSilently()
+      }, 15 * 60 * 1000)
+      syncEventUnlisten = await listen('schemes-changed', async () => {
+        await loadSchemes()
+        if (showSyncLogModal && get(activeSchemeIdStore)) {
+          await loadSyncLogs(get(activeSchemeIdStore)!)
+        }
+      })
+    } finally {
+      loadingFlags.stop('initial')
+    }
   })
 
   onDestroy(() => {
@@ -128,106 +114,69 @@
 
   async function loadAppVersion() {
     try {
-      appVersion = await getVersion()
+      appVersion.set(await getAppVersion())
     } catch (e) {
       console.error('Failed to load app version:', e)
-      appVersion = ''
+      appVersion.set('')
     }
   }
-  
-  function updateTheme() {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-    localStorage.setItem('theme', isDarkMode ? 'dark' : 'light')
+
+  function handleThemeToggle(detail: { isDark: boolean }) {
+    theme.setTheme(detail.isDark)
   }
-  
-  function handleThemeToggle(event: CustomEvent) {
-    isDarkMode = event.detail.isDark
-    updateTheme()
-  }
-  
+
   async function loadSchemes() {
     try {
-      isLoading = true
-      error = null
-      const loadedSchemes = await invoke<Scheme[]>('get_all_schemes')
-      schemes = loadedSchemes
-
-      if (loadedSchemes.length === 0) {
-        activeSchemeId = null
-        activeScheme = null
-        editorContent = ''
-        return
-      }
-
-      const preservedActiveId = activeSchemeId && loadedSchemes.some((scheme) => scheme.id === activeSchemeId)
-        ? activeSchemeId
-        : loadedSchemes[0].id
-
-      activeSchemeId = preservedActiveId
-      activeScheme = loadedSchemes.find((scheme) => scheme.id === preservedActiveId) || loadedSchemes[0]
-      editorContent = activeScheme?.content || ''
+      appError.set(null)
+      const loadedSchemes = await getAllSchemes()
+      setSchemes(loadedSchemes)
     } catch (e) {
-      error = `加载分组失败: ${e}`
+      appError.set(`加载分组失败: ${e}`)
       console.error('Failed to load schemes:', e)
-    } finally {
-      isLoading = false
     }
   }
-  
-  async function handleSelectScheme(id: string) {
-    activeSchemeId = id
-    activeScheme = schemes.find(s => s.id === id) || null
-    editorContent = activeScheme?.content || ''
-  }
 
-  function applyUpdatedScheme(updatedScheme: Scheme) {
-    schemes = schemes.map((scheme) => (scheme.id === updatedScheme.id ? updatedScheme : scheme))
-
-    if (activeSchemeId === updatedScheme.id) {
-      activeScheme = updatedScheme
-      editorContent = updatedScheme.content
-    }
+  function handleSelectScheme(id: string) {
+    selectScheme(id)
   }
 
   async function checkHostsPermission() {
     try {
-      hostsPermissionInfo = await invoke<HostsPermissionInfo>('check_hosts_permission')
+      hostsPermissionInfo.set(await fetchHostsPermission())
     } catch (e) {
       console.error('Failed to check hosts permission:', e)
-      hostsPermissionInfo = null
+      hostsPermissionInfo.set(null)
     }
   }
 
   async function openCurrentHostsModal() {
     try {
-      isLoading = true
-      error = null
-      currentHostsContent = await invoke('get_hosts_content')
+      isOpeningCurrentHosts = true
+      loadingFlags.start('currentHosts')
+      appError.set(null)
+      currentHostsContent = await getHostsContent()
       showCurrentHostsModal = true
     } catch (e) {
-      error = `读取当前 Hosts 失败: ${e}`
+      appError.set(`读取当前 Hosts 失败: ${e}`)
       console.error('Failed to get current hosts content:', e)
     } finally {
-      isLoading = false
+      isOpeningCurrentHosts = false
+      loadingFlags.stop('currentHosts')
     }
   }
 
   async function handleFlushDns() {
     try {
       isFlushingDns = true
-      error = null
-      const result = await invoke<DnsFlushResult>('flush_dns_cache')
+      appError.set(null)
+      const result = await flushDnsCache()
       if (result.success) {
-        showSuccessToast(result.message)
+        showToast(result.message, 'success')
       } else {
-        error = result.message
+        appError.set(result.message)
       }
     } catch (e) {
-      error = `刷新 DNS 缓存失败: ${e}`
+      appError.set(`刷新 DNS 缓存失败: ${e}`)
       console.error('Failed to flush DNS cache:', e)
     } finally {
       isFlushingDns = false
@@ -239,15 +188,11 @@
 
     try {
       if (!silent) {
-        isLoading = true
-        error = null
+        loadingFlags.start('updateCheck')
+        appError.set(null)
       }
 
-      const [releaseInfo, updaterUpdate] = await Promise.all([
-        invoke<UpdateInfo>('check_for_updates'),
-        check()
-      ])
-
+      const { releaseInfo, updaterUpdate } = await checkForUpdates()
       updateInfo = releaseInfo
       availableUpdate = updaterUpdate
       hasPendingUpdate = !!(releaseInfo.has_update || updaterUpdate)
@@ -257,16 +202,16 @@
       }
 
       if (!silent && updateInfo && !updateInfo.has_update) {
-        showSuccessToast(`当前已是最新版本 ${updateInfo.current_version}`)
+        showToast(`当前已是最新版本 ${updateInfo.current_version}`, 'success')
       }
     } catch (e) {
       if (!silent) {
-        error = `检查更新失败: ${e}`
+        appError.set(`检查更新失败: ${e}`)
       }
       console.error(`Failed to ${silent ? 'silently c' : 'c'}heck for updates:`, e)
     } finally {
       if (!silent) {
-        isLoading = false
+        loadingFlags.stop('updateCheck')
       }
     }
   }
@@ -291,7 +236,7 @@
 
     try {
       isInstallingUpdate = true
-      error = null
+      appError.set(null)
       updateProgressText = '正在准备下载更新...'
 
       await availableUpdate.downloadAndInstall((event: DownloadEvent) => {
@@ -309,9 +254,9 @@
 
       updateProgressText = '安装完成，应用即将重启...'
       hasPendingUpdate = false
-      await invoke('restart_app')
+      await restartApp()
     } catch (e) {
-      error = `安装更新失败: ${e}`
+      appError.set(`安装更新失败: ${e}`)
       console.error('Failed to install update:', e)
       updateProgressText = ''
     } finally {
@@ -345,103 +290,102 @@
   }
 
   function openRemoteEditModal(id: string) {
-    const target = schemes.find((scheme) => scheme.id === id && scheme.remote_url) || null
+    const target = get(schemesStore).find((scheme) => scheme.id === id && scheme.remote_url) || null
     if (!target) return
     createModalMode = 'edit-remote'
     remoteEditTarget = target
     showCreateModal = true
   }
   
-  async function handleCreateConfirm(event: CustomEvent) {
-    const name = event.detail.name?.trim()
-    const type = event.detail.type as 'local' | 'remote'
-    const remoteUrl = event.detail.remoteUrl?.trim() || ''
-    const autoSyncEnabled = Boolean(event.detail.autoSyncEnabled)
-    const syncIntervalInput = event.detail.syncIntervalMinutes as string
+  async function handleCreateConfirm(detail: {
+    name: string
+    type: 'local' | 'remote'
+    remoteUrl: string
+    autoSyncEnabled: boolean
+    syncIntervalMinutes: string
+  }) {
+    const name = detail.name?.trim()
+    const type = detail.type
+    const remoteUrl = detail.remoteUrl?.trim() || ''
+    const autoSyncEnabled = Boolean(detail.autoSyncEnabled)
+    const syncIntervalInput = detail.syncIntervalMinutes
     const syncIntervalMinutes = syncIntervalInput ? Number(syncIntervalInput) : null
+    const currentSchemes = get(schemesStore)
 
     if (!name) return
     if (type === 'remote' && !remoteUrl) {
-      error = '远程 URL 分组必须填写远程地址'
+      appError.set('远程 URL 分组必须填写远程地址')
       return
     }
     if (type === 'remote' && autoSyncEnabled && (!syncIntervalMinutes || syncIntervalMinutes <= 0)) {
-      error = '启用定时同步时，请填写大于 0 的同步间隔'
+      appError.set('启用定时同步时，请填写大于 0 的同步间隔')
       return
     }
     
     try {
       isCreatingScheme = true
-      isLoading = true
-      error = null
+      loadingFlags.start('create')
+      appError.set(null)
 
       if (createModalMode === 'edit-remote' && remoteEditTarget) {
-        const renamedScheme = await invoke<Scheme>('update_scheme', {
-          id: remoteEditTarget.id,
+        const renamedScheme = await updateSchemeRequest(
+          remoteEditTarget.id,
           name,
-          content: schemes.find((scheme) => scheme.id === remoteEditTarget.id)?.content || ''
-        })
+          currentSchemes.find((scheme) => scheme.id === remoteEditTarget.id)?.content || ''
+        )
 
-        const updatedRemoteScheme = await invoke<Scheme>('update_scheme_remote_config', {
-          id: remoteEditTarget.id,
+        const updatedRemoteScheme = await updateSchemeRemoteConfigRequest(
+          remoteEditTarget.id,
           remoteUrl,
           autoSyncEnabled,
           syncIntervalMinutes
-        })
+        )
 
-        applyUpdatedScheme({
+        applyUpdatedSchemeStore({
           ...updatedRemoteScheme,
           name: renamedScheme.name
         })
         showCreateModal = false
         remoteEditTarget = null
-        showSuccessToast('远程分组配置已更新')
+        showToast('远程分组配置已更新', 'success')
         return
       }
 
-      let newScheme = await invoke<Scheme>('create_scheme', {
+      let newScheme = await createSchemeRequest(
         name,
-        content: type === 'remote'
+        type === 'remote'
           ? '# 远程 URL 分组\n# 首次同步后会自动填充内容\n'
           : '# 新的 hosts 配置\n127.0.0.1 localhost\n'
-      })
+      )
 
       if (type === 'remote') {
-        newScheme = await invoke<Scheme>('update_scheme_remote_config', {
-          id: newScheme.id,
+        newScheme = await updateSchemeRemoteConfigRequest(
+          newScheme.id,
           remoteUrl,
           autoSyncEnabled,
           syncIntervalMinutes
-        })
+        )
       }
 
-      if (schemes.some((scheme) => scheme.id === newScheme.id)) {
-        schemes = schemes.map((scheme) => (scheme.id === newScheme.id ? newScheme : scheme))
-      } else {
-        schemes = [...schemes, newScheme]
-      }
-
-      activeSchemeId = newScheme.id
-      activeScheme = newScheme
-      editorContent = newScheme.content
+      upsertScheme(newScheme)
       showCreateModal = false
 
       if (type === 'remote') {
         try {
-          const syncedScheme = await invoke<Scheme>('sync_remote_scheme', { id: newScheme.id, trigger: 'manual' })
-          applyUpdatedScheme(syncedScheme)
-          showSuccessToast('远程 URL 分组已创建并完成首次同步')
+          const syncedScheme = await syncRemoteScheme(newScheme.id, 'manual')
+          applyUpdatedSchemeStore(syncedScheme)
+          showToast('远程 URL 分组已创建并完成首次同步', 'success')
         } catch (syncError) {
-          error = `远程分组已创建，但首次同步失败: ${syncError}`
+          appError.set(`远程分组已创建，但首次同步失败: ${syncError}`)
           console.error('Failed to sync new remote scheme:', syncError)
         }
       }
     } catch (e) {
-      error = `创建分组失败: ${e}`
+      appError.set(`创建分组失败: ${e}`)
       console.error('Failed to create scheme:', e)
     } finally {
       isCreatingScheme = false
-      isLoading = false
+      loadingFlags.stop('create')
     }
   }
   
@@ -454,91 +398,66 @@
     if (!deleteTargetId) return
     
     try {
-      isLoading = true
-      error = null
-      await invoke('delete_scheme', { id: deleteTargetId })
-      
-      schemes = schemes.filter(s => s.id !== deleteTargetId)
-      if (activeSchemeId === deleteTargetId) {
-        activeSchemeId = schemes.length > 0 ? schemes[0].id : null
-        activeScheme = activeSchemeId ? schemes[0] : null
-        editorContent = activeScheme?.content || ''
-      }
+      loadingFlags.start('delete')
+      appError.set(null)
+      await deleteSchemeRequest(deleteTargetId)
+      removeScheme(deleteTargetId)
+      showDeleteModal = false
+      showToast('分组已删除', 'success')
     } catch (e) {
-      error = `删除分组失败: ${e}`
+      appError.set(`删除分组失败: ${e}`)
       console.error('Failed to delete scheme:', e)
     } finally {
-      isLoading = false
+      loadingFlags.stop('delete')
       deleteTargetId = null
     }
   }
   
-  async function handleContentChange(event: CustomEvent) {
-    editorContent = event.detail.content
-    
-    if (activeSchemeId) {
+  async function handleContentChange(detail: { content: string }) {
+    const nextContent = detail.content
+    setEditorContent(nextContent)
+    const currentActiveSchemeId = get(activeSchemeIdStore)
+    const currentActiveScheme = get(activeSchemeStore)
+
+    if (currentActiveSchemeId) {
       try {
-        const updated = await invoke('update_scheme', {
-          id: activeSchemeId,
-          name: activeScheme?.name || '未命名',
-          content: editorContent
-        })
-        
-        schemes = schemes.map(s => s.id === updated.id ? updated : s)
-        activeScheme = updated
+        const updated = await updateSchemeRequest(currentActiveSchemeId, currentActiveScheme?.name || '未命名', nextContent)
+        applyUpdatedSchemeStore(updated)
       } catch (e) {
         console.error('Failed to update scheme:', e)
       }
     }
   }
   
-  async function handleRename(event: CustomEvent) {
-    const { id, name } = event.detail
+  async function handleRename(detail: { id: string; name: string }) {
+    const { id, name } = detail
     try {
-      isLoading = true
-      error = null
-      const updated = await invoke('update_scheme', {
-        id,
-        name,
-        content: schemes.find(s => s.id === id)?.content || ''
-      })
-      
-      schemes = schemes.map(s => s.id === updated.id ? updated : s)
-      if (activeSchemeId === id) {
-        activeScheme = updated
-      }
+      loadingFlags.start('rename')
+      appError.set(null)
+      const updated = await updateSchemeRequest(id, name, get(schemesStore).find((scheme) => scheme.id === id)?.content || '')
+      applyUpdatedSchemeStore(updated)
     } catch (e) {
-      error = `重命名失败: ${e}`
+      appError.set(`重命名失败: ${e}`)
       console.error('Failed to rename scheme:', e)
     } finally {
-      isLoading = false
+      loadingFlags.stop('rename')
     }
   }
 
-  async function handleToggleScheme(event: CustomEvent) {
-    const { id, enabled } = event.detail
+  async function handleToggleScheme(detail: { id: string; enabled: boolean }) {
+    const { id, enabled } = detail
 
     try {
-      isLoading = true
-      error = null
-      schemes = await invoke('set_scheme_enabled', { id, enabled })
-
-      activeSchemeId = id
-
-      activeScheme = activeSchemeId
-        ? schemes.find((scheme) => scheme.id === activeSchemeId) || null
-        : null
-
-      if (activeScheme) {
-        editorContent = activeScheme.content
-      }
-
-      showSuccessToast(enabled ? '分组已启用并生效' : '分组已停用并生效')
+      loadingFlags.start('toggle')
+      appError.set(null)
+      const nextSchemes = await setSchemeEnabledRequest(id, enabled)
+      setSchemes(nextSchemes, id)
+      showToast(enabled ? '分组已启用并生效' : '分组已停用并生效', 'success')
     } catch (e) {
-      error = `${enabled ? '启用' : '禁用'}分组失败: ${e}`
+      appError.set(`${enabled ? '启用' : '禁用'}分组失败: ${e}`)
       console.error('Failed to toggle scheme:', e)
     } finally {
-      isLoading = false
+      loadingFlags.stop('toggle')
     }
   }
 
@@ -549,22 +468,19 @@
       syncingSchemeIds.add(id)
       if (!silent) {
         isSyncingRemoteScheme = true
-        isLoading = true
-        error = null
+        loadingFlags.start('sync')
+        appError.set(null)
       }
 
-      const updated = await invoke<Scheme>('sync_remote_scheme', {
-        id,
-        trigger: silent ? 'scheduled' : 'manual'
-      })
-      applyUpdatedScheme(updated)
+      const updated = await syncRemoteScheme(id, silent ? 'scheduled' : 'manual')
+      applyUpdatedSchemeStore(updated)
 
       if (!silent) {
-        showSuccessToast('远程分组同步成功')
+        showToast('远程分组同步成功', 'success')
       }
     } catch (e) {
       if (!silent) {
-        error = `同步远程分组失败: ${e}`
+        appError.set(`同步远程分组失败: ${e}`)
       }
       console.error('Failed to sync remote scheme:', e)
       await loadSchemes()
@@ -572,25 +488,27 @@
       syncingSchemeIds.delete(id)
       if (!silent) {
         isSyncingRemoteScheme = false
-        isLoading = false
+        loadingFlags.stop('sync')
       }
     }
   }
 
   async function handleSyncActiveScheme() {
-    if (!activeSchemeId) return
-    await syncSchemeById(activeSchemeId, false)
+    const currentActiveSchemeId = get(activeSchemeIdStore)
+    if (!currentActiveSchemeId) return
+    await syncSchemeById(currentActiveSchemeId, false)
   }
 
   function openSyncLogModal() {
-    if (!activeScheme?.remote_url) return
-    void loadSyncLogs(activeScheme.id)
+    const currentActiveScheme = get(activeSchemeStore)
+    if (!currentActiveScheme?.remote_url) return
+    void loadSyncLogs(currentActiveScheme.id)
     showSyncLogModal = true
   }
 
   async function loadSyncLogs(id: string) {
     try {
-      syncLogs = await invoke('get_scheme_sync_logs', { id })
+      syncLogs = await getSchemeSyncLogs(id)
     } catch (e) {
       console.error('Failed to load sync logs:', e)
       syncLogs = []
@@ -601,7 +519,7 @@
     try {
       const exportPath = await save({
         title: '导出分组',
-        defaultPath: `rust-switchhost-schemes-${appVersion || 'backup'}.json`,
+        defaultPath: `rust-switchhost-schemes-${get(appVersion) || 'backup'}.json`,
         filters: [
           {
             name: 'JSON',
@@ -612,15 +530,17 @@
 
       if (!exportPath) return
 
-      isLoading = true
-      error = null
-      await invoke('export_schemes', { path: exportPath })
-      showSuccessToast('分组已导出')
+      isExportingSchemes = true
+      loadingFlags.start('export')
+      appError.set(null)
+      await exportSchemesRequest(exportPath)
+      showToast('分组已导出', 'success')
     } catch (e) {
-      error = `导出分组失败: ${e}`
+      appError.set(`导出分组失败: ${e}`)
       console.error('Failed to export schemes:', e)
     } finally {
-      isLoading = false
+      isExportingSchemes = false
+      loadingFlags.stop('export')
     }
   }
 
@@ -640,41 +560,26 @@
 
       if (!importPath || Array.isArray(importPath)) return
 
-      isLoading = true
-      error = null
-      schemes = await invoke('import_schemes', { path: importPath })
-      activeScheme = activeSchemeId
-        ? schemes.find((scheme) => scheme.id === activeSchemeId) || schemes[0] || null
-        : schemes[0] || null
-      activeSchemeId = activeScheme?.id || null
-      editorContent = activeScheme?.content || ''
-      showSuccessToast('分组已导入，导入项默认未启用')
+      isImportingSchemes = true
+      loadingFlags.start('import')
+      appError.set(null)
+      setSchemes(await importSchemesRequest(importPath))
+      showToast('分组已导入，导入项默认未启用', 'success')
     } catch (e) {
-      error = `导入分组失败: ${e}`
+      appError.set(`导入分组失败: ${e}`)
       console.error('Failed to import schemes:', e)
     } finally {
-      isLoading = false
+      isImportingSchemes = false
+      loadingFlags.stop('import')
     }
   }
-  
-  function showSuccessToast(message: string) {
-    const toast = document.createElement('div')
-    toast.className = 'toast success'
-    toast.textContent = message
-    document.body.appendChild(toast)
-    
-    setTimeout(() => {
-      toast.classList.add('show')
-    }, 10)
-    
-    setTimeout(() => {
-      toast.classList.remove('show')
-      setTimeout(() => toast.remove(), 300)
-    }, 2000)
+
+  function showToast(message: string, kind: 'success' | 'error' | 'warning' | 'info' = 'info') {
+    toasts.push(message, kind)
   }
 
-  function handleSidebarResize(event: CustomEvent) {
-    sidebarWidth = event.detail.width
+  function handleSidebarResize(detail: { width: number }) {
+    sidebarWidth = detail.width
     localStorage.setItem('sidebar-width', String(sidebarWidth))
   }
 
@@ -692,12 +597,12 @@
   }
 </script>
 
-<div class="app" class:dark={isDarkMode}>
+<div class="app" class:dark={$theme}>
   <div class="header">
     <div class="header-brand">
       <h1>🔧 Rust SwitchHost</h1>
-      {#if appVersion}
-        <span class="app-version">v{appVersion}</span>
+      {#if $appVersion}
+        <span class="app-version">v{$appVersion}</span>
       {/if}
     </div>
     <div class="header-actions">
@@ -705,93 +610,98 @@
         class="btn-secondary update-trigger"
         class:has-notification={hasPendingUpdate}
         on:click={handleCheckUpdates}
-        disabled={isLoading}
+        disabled={$loadingFlags.updateCheck}
       >
-        检查更新
+        {$loadingFlags.updateCheck ? '检查中...' : '检查更新'}
       </button>
-      <button class="btn-secondary" on:click={handleFlushDns} disabled={isLoading || isFlushingDns}>
+      <button class="btn-secondary" on:click={handleFlushDns} disabled={isFlushingDns}>
         {isFlushingDns ? '刷新 DNS 中...' : '刷新 DNS'}
       </button>
-      <button class="btn-secondary" on:click={openCurrentHostsModal} disabled={isLoading}>
-        查看当前 Hosts
+      <button class="btn-secondary" on:click={openCurrentHostsModal} disabled={isOpeningCurrentHosts}>
+        {isOpeningCurrentHosts ? '读取中...' : '查看当前 Hosts'}
       </button>
-      <ThemeToggle isDark={isDarkMode} on:toggle={handleThemeToggle} />
+      <ThemeToggle isDark={$theme} onToggle={handleThemeToggle} />
     </div>
   </div>
   
-  {#if error}
+  {#if $appError}
     <div class="error-banner">
-      {error}
-      <button on:click={() => error = null}>×</button>
+      {$appError}
+      <button on:click={() => appError.set(null)}>×</button>
     </div>
   {/if}
 
-  {#if hostsPermissionInfo && !hostsPermissionInfo.has_permission}
+  {#if $hostsPermissionInfo && !$hostsPermissionInfo.has_permission}
     <div class="permission-banner">
       <div>
         <strong>Hosts 权限不足</strong>
-        <span>{hostsPermissionInfo.message}</span>
+        <span>{$hostsPermissionInfo.message}</span>
       </div>
     </div>
   {/if}
   
   <div class="main">
     <Sidebar
-      {schemes}
-      {activeSchemeId}
+      schemes={$schemesStore}
+      activeSchemeId={$activeSchemeIdStore}
       width={sidebarWidth}
-      on:select={(e) => handleSelectScheme(e.detail.id)}
-      on:create={openCreateModal}
-      on:import={handleImportSchemes}
-      on:export={handleExportSchemes}
-      on:delete={(e) => openDeleteModal(e.detail.id)}
-      on:editRemote={(e) => openRemoteEditModal(e.detail.id)}
-      on:rename={handleRename}
-      on:toggle={handleToggleScheme}
-      on:resize={handleSidebarResize}
+      onSelect={(detail) => handleSelectScheme(detail.id)}
+      onCreate={openCreateModal}
+      onImport={handleImportSchemes}
+      onExport={handleExportSchemes}
+      onDelete={(detail) => openDeleteModal(detail.id)}
+      onEditRemote={(detail) => openRemoteEditModal(detail.id)}
+      onRename={handleRename}
+      onToggle={handleToggleScheme}
+      onResize={handleSidebarResize}
     />
     
     <div class="content">
-      {#if activeScheme}
+      {#if $loadingFlags.initial && $schemesStore.length === 0}
+        <div class="initial-loading">
+          <div class="spinner"></div>
+          <p>正在加载分组与权限信息...</p>
+        </div>
+      {:else if $activeSchemeStore}
         <div class="editor-header">
           <div class="editor-title">
-            <h2>{activeScheme.name}</h2>
+            <h2>{$activeSchemeStore.name}</h2>
             <span class="scheme-meta">
-              分组内容编辑中 | 创建于 {new Date(activeScheme.created_at).toLocaleString()}
+              分组内容编辑中 | 创建于 {new Date($activeSchemeStore.created_at).toLocaleString()}
             </span>
-            {#if activeScheme.remote_url}
+            {#if $activeSchemeStore.remote_url}
               <span class="remote-meta">
                 远程源已配置
-                {#if activeScheme.auto_sync_enabled && activeScheme.sync_interval_minutes}
-                  · 每 {activeScheme.sync_interval_minutes} 分钟同步
+                {#if $activeSchemeStore.auto_sync_enabled && $activeSchemeStore.sync_interval_minutes}
+                  · 每 {$activeSchemeStore.sync_interval_minutes} 分钟同步
                 {/if}
               </span>
               <div class="sync-status-row">
-                <span class={`sync-badge ${activeScheme.sync_status || 'idle'}`}>
-                  {formatSyncStatus(activeScheme.sync_status)}
+                <span class={`sync-badge ${$activeSchemeStore.sync_status || 'idle'}`}>
+                  {formatSyncStatus($activeSchemeStore.sync_status)}
                 </span>
-                {#if activeScheme.last_sync_message}
-                  <span class="sync-message">{activeScheme.last_sync_message}</span>
+                {#if $activeSchemeStore.last_sync_message}
+                  <span class="sync-message">{$activeSchemeStore.last_sync_message}</span>
                 {/if}
-                {#if activeScheme.next_retry_at && activeScheme.sync_status === 'error'}
+                {#if $activeSchemeStore.next_retry_at && $activeSchemeStore.sync_status === 'error'}
                   <span class="sync-next-retry">
-                    下次重试：{new Date(activeScheme.next_retry_at).toLocaleString()}
+                    下次重试：{new Date($activeSchemeStore.next_retry_at).toLocaleString()}
                   </span>
                 {/if}
               </div>
             {/if}
           </div>
           <div class="editor-actions">
-            {#if activeScheme.remote_url}
-              <button class="btn-secondary" on:click={openSyncLogModal} disabled={isLoading}>
+            {#if $activeSchemeStore.remote_url}
+              <button class="btn-secondary" on:click={openSyncLogModal} disabled={isSyncingRemoteScheme}>
                 同步日志
               </button>
-              {#if activeScheme.sync_status === 'error'}
-                <button class="btn-secondary" on:click={handleSyncActiveScheme} disabled={isSyncingRemoteScheme || isLoading}>
+              {#if $activeSchemeStore.sync_status === 'error'}
+                <button class="btn-secondary" on:click={handleSyncActiveScheme} disabled={isSyncingRemoteScheme}>
                   重试同步
                 </button>
               {/if}
-              <button class="btn-secondary" on:click={handleSyncActiveScheme} disabled={isSyncingRemoteScheme || isLoading}>
+              <button class="btn-secondary" on:click={handleSyncActiveScheme} disabled={isSyncingRemoteScheme}>
                 {isSyncingRemoteScheme ? '同步中...' : '立即同步'}
               </button>
             {/if}
@@ -799,8 +709,8 @@
         </div>
         
         <Editor
-          content={editorContent}
-          on:change={handleContentChange}
+          content={$editorContentStore}
+          onChange={handleContentChange}
         />
       {:else}
         <div class="empty-state">
@@ -813,13 +723,7 @@
       {/if}
     </div>
   </div>
-  
-  {#if isLoading}
-    <div class="loading-overlay">
-      <div class="spinner"></div>
-    </div>
-  {/if}
-  
+
   {#if showCreateModal}
     <CreateSchemeModal
       isOpen={showCreateModal}
@@ -830,8 +734,8 @@
       initialRemoteUrl={remoteEditTarget?.remote_url || ''}
       initialAutoSyncEnabled={remoteEditTarget?.auto_sync_enabled || false}
       initialSyncIntervalMinutes={remoteEditTarget?.sync_interval_minutes ? String(remoteEditTarget.sync_interval_minutes) : '15'}
-      on:confirm={handleCreateConfirm}
-      on:close={() => {
+      onConfirm={handleCreateConfirm}
+      onClose={() => {
         showCreateModal = false
         remoteEditTarget = null
         createModalMode = 'create'
@@ -845,152 +749,45 @@
       confirmText="删除"
       cancelText="取消"
       type="danger"
-      on:confirm={handleDeleteConfirm}
-      on:cancel={() => { showDeleteModal = false; deleteTargetId = null; }}
-      on:close={() => { showDeleteModal = false; deleteTargetId = null; }}
+      onConfirm={handleDeleteConfirm}
+      onCancel={() => { showDeleteModal = false; deleteTargetId = null }}
+      onClose={() => { showDeleteModal = false; deleteTargetId = null }}
     >
-      <p class="confirm-text">确定要删除分组「{schemes.find(s => s.id === deleteTargetId)?.name || ''}」吗？</p>
+      <p class="confirm-text">确定要删除分组「{$schemesStore.find((scheme) => scheme.id === deleteTargetId)?.name || ''}」吗？</p>
       <p class="confirm-warning">此操作不可撤销。</p>
     </Modal>
   {/if}
 
-  {#if showCurrentHostsModal}
-    <div
-      class="hosts-modal-overlay"
-      on:click|self={() => showCurrentHostsModal = false}
-      on:keydown={(e) => e.key === 'Escape' && (showCurrentHostsModal = false)}
-      role="dialog"
-      aria-modal="true"
-      aria-label="当前 Hosts 文件"
-      tabindex="0"
-    >
-      <div class="hosts-modal" role="document">
-        <div class="hosts-modal-header">
-          <div>
-            <h3>当前 Hosts 文件</h3>
-            <p>这里显示的是系统当前实际 hosts 内容</p>
-          </div>
-          <button
-            class="hosts-close-btn"
-            on:click={() => showCurrentHostsModal = false}
-            aria-label="关闭"
-          >
-            ×
-          </button>
-        </div>
+  <CurrentHostsModal
+    isOpen={showCurrentHostsModal}
+    content={currentHostsContent}
+    onClose={() => { showCurrentHostsModal = false }}
+  />
 
-        <div class="hosts-modal-body">
-          <Editor content={currentHostsContent} readOnly={true} />
-        </div>
-      </div>
-    </div>
+  {#if updateInfo}
+    <UpdateModal
+      isOpen={showUpdateModal}
+      {updateInfo}
+      {availableUpdate}
+      {isInstallingUpdate}
+      {updateProgressText}
+      {formatPublishedAt}
+      onClose={() => { showUpdateModal = false }}
+      onOpenUrl={openUpdateUrl}
+      onInstall={handleInstallUpdate}
+    />
   {/if}
 
-  {#if showUpdateModal && updateInfo}
-    <div
-      class="hosts-modal-overlay"
-      on:click|self={() => showUpdateModal = false}
-      on:keydown={(e) => e.key === 'Escape' && (showUpdateModal = false)}
-      role="dialog"
-      aria-modal="true"
-      aria-label="检查更新"
-      tabindex="0"
-    >
-      <div class="update-modal" role="document">
-        <div class="hosts-modal-header">
-          <div>
-            <h3>在线升级</h3>
-            <p>
-              当前版本 {updateInfo.current_version} · 最新版本 {updateInfo.latest_version}
-            </p>
-          </div>
-          <button
-            class="hosts-close-btn"
-            on:click={() => showUpdateModal = false}
-            aria-label="关闭"
-          >
-            ×
-          </button>
-        </div>
-
-        <div class="update-modal-body">
-          <div class:status-card={true} class:update-available={updateInfo.has_update}>
-            <strong>{updateInfo.has_update ? '发现新版本' : '当前已是最新版本'}</strong>
-            <span>发布时间：{formatPublishedAt(updateInfo.published_at)}</span>
-          </div>
-
-          <div class="update-meta">
-            <div class="update-meta-row">
-              <span>版本标题</span>
-              <strong>{updateInfo.release_name}</strong>
-            </div>
-            <div class="update-meta-row">
-              <span>一键升级</span>
-              <strong>{availableUpdate ? '可直接下载安装' : '当前仅可跳转下载'}</strong>
-            </div>
-            <div class="update-meta-row">
-              <span>发布页</span>
-              <button class="link-btn" on:click={() => openUpdateUrl(updateInfo.html_url)}>
-                打开 GitHub Release
-              </button>
-            </div>
-            {#if updateInfo.download_url}
-              <div class="update-meta-row">
-                <span>推荐下载</span>
-                <button class="link-btn" on:click={() => openUpdateUrl(updateInfo.download_url!)}>
-                  打开当前系统下载链接
-                </button>
-              </div>
-            {/if}
-          </div>
-
-          <div class="release-notes">
-            <h4>发布说明</h4>
-            <pre>{updateInfo.body || '暂无发布说明'}</pre>
-          </div>
-
-          {#if updateInfo.has_update}
-            <div class="update-actions">
-              <button
-                class="btn-secondary"
-                on:click={() => openUpdateUrl(updateInfo.html_url)}
-                disabled={isInstallingUpdate}
-              >
-                查看发布页
-              </button>
-              <button
-                class="btn-primary"
-                on:click={handleInstallUpdate}
-                disabled={isInstallingUpdate}
-              >
-                {isInstallingUpdate
-                  ? '升级中...'
-                  : availableUpdate
-                    ? '一键下载安装并重启'
-                    : '打开下载链接'}
-              </button>
-            </div>
-          {/if}
-
-          {#if updateProgressText}
-            <div class="update-progress">
-              {updateProgressText}
-            </div>
-          {/if}
-        </div>
-      </div>
-    </div>
-  {/if}
-
-  {#if showSyncLogModal && activeScheme}
+  {#if showSyncLogModal && $activeSchemeStore}
     <SyncLogModal
       isOpen={showSyncLogModal}
-      schemeName={activeScheme.name}
+      schemeName={$activeSchemeStore.name}
       logs={syncLogs}
       onClose={() => { showSyncLogModal = false }}
     />
   {/if}
 
+  <Toast />
 </div>
 
 <style>
@@ -1028,39 +825,6 @@
     --syntax-comment: #6a9955;
   }
   
-  :global(.toast) {
-    position: fixed;
-    top: 80px;
-    left: 50%;
-    transform: translateX(-50%) translateY(-20px);
-    padding: 12px 24px;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 500;
-    z-index: 3000;
-    opacity: 0;
-    transition: all 0.3s ease;
-    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
-  }
-  
-  :global(.toast.success) {
-    background: #f6ffed;
-    color: #52c41a;
-    border: 1px solid #b7eb8f;
-    box-shadow: 0 4px 12px rgba(82, 196, 26, 0.2);
-  }
-  
-  :global(.toast.show) {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
-  
-  :global(.dark .toast.success) {
-    background: #162312;
-    color: #95de64;
-    border-color: #3d5c2e;
-  }
-  
   .app {
     height: 100vh;
     display: flex;
@@ -1068,7 +832,7 @@
     background: var(--editor-bg);
     color: var(--text-primary);
     transition: background-color 0.3s, color 0.3s;
-    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+    font-family: var(--font-family);
   }
   
   .header {
@@ -1346,24 +1110,22 @@
     margin: 0 0 24px 0;
     font-size: 16px;
   }
-  
-  .loading-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(255, 255, 255, 0.8);
+
+  .initial-loading {
+    flex: 1;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    gap: 14px;
+    color: var(--text-secondary);
   }
-  
-  .dark .loading-overlay {
-    background: rgba(30, 30, 30, 0.8);
+
+  .initial-loading p {
+    margin: 0;
+    font-size: 14px;
   }
-  
+
   .spinner {
     width: 40px;
     height: 40px;
@@ -1389,189 +1151,4 @@
     color: var(--danger-color, #ff4d4f);
   }
 
-  .hosts-modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2100;
-    padding: 24px;
-  }
-
-  .hosts-modal {
-    width: min(1100px, 100%);
-    height: min(760px, calc(100vh - 48px));
-    background: var(--editor-bg);
-    border-radius: 12px;
-    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .hosts-modal-header {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-  }
-
-  .hosts-modal-header h3 {
-    margin: 0 0 4px 0;
-    font-size: 18px;
-    color: var(--text-primary);
-  }
-
-  .hosts-modal-header p {
-    margin: 0;
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-
-  .hosts-close-btn {
-    width: 36px;
-    height: 36px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 24px;
-    line-height: 1;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .hosts-close-btn:hover {
-    background: var(--hover-bg);
-    color: var(--text-primary);
-  }
-
-  .hosts-modal-body {
-    flex: 1;
-    min-height: 0;
-  }
-
-  .update-modal {
-    width: min(760px, 100%);
-    max-height: min(760px, calc(100vh - 48px));
-    background: var(--editor-bg);
-    border-radius: 12px;
-    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .update-modal-body {
-    padding: 20px;
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .status-card {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 14px 16px;
-    border-radius: 10px;
-    background: var(--hover-bg);
-    border: 1px solid var(--border-color);
-  }
-
-  .status-card strong {
-    font-size: 15px;
-    color: var(--text-primary);
-  }
-
-  .status-card span {
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-
-  .status-card.update-available {
-    border-color: #91d5ff;
-    background: rgba(24, 144, 255, 0.08);
-  }
-
-  .update-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .update-meta-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  .update-meta-row span {
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-
-  .update-meta-row strong {
-    font-size: 14px;
-    color: var(--text-primary);
-    text-align: right;
-  }
-
-  .link-btn {
-    border: none;
-    background: transparent;
-    color: var(--primary-color);
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    padding: 0;
-  }
-
-  .link-btn:hover {
-    color: var(--primary-hover);
-    text-decoration: underline;
-  }
-
-  .release-notes h4 {
-    margin: 0 0 10px 0;
-    color: var(--text-primary);
-    font-size: 15px;
-  }
-
-  .release-notes pre {
-    margin: 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--text-primary);
-    background: var(--hover-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
-    padding: 14px 16px;
-  }
-
-  .update-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-  }
-
-  .update-progress {
-    padding: 12px 14px;
-    border-radius: 10px;
-    background: var(--hover-bg);
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-    font-size: 13px;
-  }
 </style>

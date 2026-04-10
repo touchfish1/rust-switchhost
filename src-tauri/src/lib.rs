@@ -9,6 +9,8 @@ use schemes::SchemeManager;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, WindowEvent};
 
+const BACKGROUND_SYNC_INTERVAL_SECS: u64 = 30;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let scheme_manager = SchemeManager::new().expect("Failed to initialize SchemeManager");
@@ -23,8 +25,9 @@ pub fn run() {
         .setup(|app| {
             #[cfg(debug_assertions)]
             {
-                let window = app.get_webview_window("main").unwrap();
-                window.open_devtools();
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
             }
 
             tray::setup_tray(&app.handle())?;
@@ -34,7 +37,7 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                window.hide().unwrap();
+                let _ = window.hide();
                 api.prevent_close();
             }
         })
@@ -79,7 +82,7 @@ fn start_background_sync(app: AppHandle) {
                 let _ = commands::schemes::perform_remote_sync(&app, job.id, job.trigger).await;
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(BACKGROUND_SYNC_INTERVAL_SECS)).await;
         }
     });
 }

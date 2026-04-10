@@ -12,8 +12,7 @@ pub fn setup_tray<R: Runtime>(
 
     let menu = Menu::with_items(app, &[&show, &quit])?;
 
-    let tray = TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
+    let mut builder = TrayIconBuilder::new()
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
@@ -25,8 +24,8 @@ pub fn setup_tray<R: Runtime>(
             {
                 let app = tray.app_handle();
                 if let Some(window) = app.get_webview_window("main") {
-                    window.show().unwrap();
-                    window.set_focus().unwrap();
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
             }
         })
@@ -36,13 +35,18 @@ pub fn setup_tray<R: Runtime>(
             }
             "show" => {
                 if let Some(window) = app.get_webview_window("main") {
-                    window.show().unwrap();
-                    window.set_focus().unwrap();
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
             }
             _ => {}
-        })
-        .build(app)?;
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+
+    let tray = builder.build(app)?;
 
     Ok(tray)
 }

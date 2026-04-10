@@ -26,6 +26,8 @@ pub fn create_scheme(
     name: String,
     content: String,
 ) -> Result<Scheme, String> {
+    validate_hosts_content(&content)?;
+
     let mut manager = state.scheme_manager.lock().map_err(|e| e.to_string())?;
     manager
         .create_scheme(name, content)
@@ -39,6 +41,8 @@ pub fn update_scheme(
     name: String,
     content: String,
 ) -> Result<Scheme, String> {
+    validate_hosts_content(&content)?;
+
     let mut manager = state.scheme_manager.lock().map_err(|e| e.to_string())?;
     manager
         .update_scheme(&id, name, content)

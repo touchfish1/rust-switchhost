@@ -1,12 +1,9 @@
 <script lang="ts">
+  import type { SyncLogEntry } from '$lib/types'
+
   export let isOpen = false
   export let schemeName = ''
-  export let logs: Array<{
-    timestamp: string
-    status: string
-    trigger: string
-    message: string
-  }> = []
+  export let logs: SyncLogEntry[] = []
 
   export let onClose: () => void
 

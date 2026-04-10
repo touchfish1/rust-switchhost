@@ -1,43 +1,66 @@
+<svelte:options runes={true} />
+
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte'
-
-  export let isOpen = false
-  export let isSubmitting = false
-  export let mode: 'create' | 'edit-remote' = 'create'
-  export let initialName = ''
-  export let initialType: 'local' | 'remote' = 'local'
-  export let initialRemoteUrl = ''
-  export let initialAutoSyncEnabled = true
-  export let initialSyncIntervalMinutes = '15'
-
-  const dispatch = createEventDispatcher()
-
-  let name = ''
-  let schemeType: 'local' | 'remote' = 'local'
-  let remoteUrl = ''
-  let autoSyncEnabled = true
-  let syncIntervalMinutes = '15'
-  let wasOpen = false
-
-  $: if (isOpen && !wasOpen) {
-    name = initialName
-    schemeType = initialType
-    remoteUrl = initialRemoteUrl
-    autoSyncEnabled = initialAutoSyncEnabled
-    syncIntervalMinutes = initialSyncIntervalMinutes
-    wasOpen = true
+  type ConfirmPayload = {
+    name: string
+    type: 'local' | 'remote'
+    remoteUrl: string
+    autoSyncEnabled: boolean
+    syncIntervalMinutes: string
   }
 
-  $: if (!isOpen && wasOpen) {
-    wasOpen = false
+  type CreateSchemeModalProps = {
+    isOpen?: boolean
+    isSubmitting?: boolean
+    mode?: 'create' | 'edit-remote'
+    initialName?: string
+    initialType?: 'local' | 'remote'
+    initialRemoteUrl?: string
+    initialAutoSyncEnabled?: boolean
+    initialSyncIntervalMinutes?: string
+    onClose?: () => void
+    onConfirm?: (payload: ConfirmPayload) => void
   }
+
+  let {
+    isOpen = false,
+    isSubmitting = false,
+    mode = 'create',
+    initialName = '',
+    initialType = 'local',
+    initialRemoteUrl = '',
+    initialAutoSyncEnabled = true,
+    initialSyncIntervalMinutes = '15',
+    onClose = () => {},
+    onConfirm = () => {}
+  }: CreateSchemeModalProps = $props()
+
+  let name = $state('')
+  let schemeType = $state<'local' | 'remote'>('local')
+  let remoteUrl = $state('')
+  let autoSyncEnabled = $state(true)
+  let syncIntervalMinutes = $state('15')
+  let wasOpen = $state(false)
+
+  $effect(() => {
+    if (isOpen && !wasOpen) {
+      name = initialName
+      schemeType = initialType
+      remoteUrl = initialRemoteUrl
+      autoSyncEnabled = initialAutoSyncEnabled
+      syncIntervalMinutes = initialSyncIntervalMinutes
+      wasOpen = true
+    } else if (!isOpen && wasOpen) {
+      wasOpen = false
+    }
+  })
 
   function handleClose() {
-    dispatch('close')
+    onClose()
   }
 
   function handleConfirm() {
-    dispatch('confirm', {
+    onConfirm({
       name: name.trim(),
       type: schemeType,
       remoteUrl: remoteUrl.trim(),
@@ -50,8 +73,8 @@
 {#if isOpen}
   <div
     class="modal-overlay"
-    on:click|self={handleClose}
-    on:keydown={(event) => event.key === 'Escape' && handleClose()}
+    onclick={(event) => event.target === event.currentTarget && handleClose()}
+    onkeydown={(event) => event.key === 'Escape' && handleClose()}
     role="dialog"
     aria-modal="true"
     aria-label={mode === 'edit-remote' ? '编辑远程分组' : '创建新分组'}
@@ -63,7 +86,7 @@
           <h3>{mode === 'edit-remote' ? '编辑远程分组' : '创建新分组'}</h3>
           <p>{mode === 'edit-remote' ? '修改远程 URL、同步开关和同步间隔' : '支持创建普通分组或远程 URL 分组'}</p>
         </div>
-        <button class="close-btn" on:click={handleClose} aria-label="关闭">×</button>
+        <button class="close-btn" onclick={handleClose} aria-label="关闭">×</button>
       </div>
 
       <div class="modal-body">
@@ -85,7 +108,7 @@
                 class="type-card"
                 class:selected={schemeType === 'local'}
                 type="button"
-                on:click={() => (schemeType = 'local')}
+                onclick={() => (schemeType = 'local')}
                 disabled={isSubmitting}
               >
                 <strong>本地分组</strong>
@@ -96,7 +119,7 @@
                 class="type-card"
                 class:selected={schemeType === 'remote'}
                 type="button"
-                on:click={() => (schemeType = 'remote')}
+                onclick={() => (schemeType = 'remote')}
                 disabled={isSubmitting}
               >
                 <strong>远程 URL</strong>
@@ -141,10 +164,10 @@
       </div>
 
       <div class="modal-footer">
-        <button class="btn btn-default" type="button" on:click={handleClose} disabled={isSubmitting}>
+        <button class="btn btn-default" type="button" onclick={handleClose} disabled={isSubmitting}>
           取消
         </button>
-        <button class="btn btn-primary" type="button" on:click={handleConfirm} disabled={isSubmitting}>
+        <button class="btn btn-primary" type="button" onclick={handleConfirm} disabled={isSubmitting}>
           {isSubmitting ? (mode === 'edit-remote' ? '保存中...' : '创建中...') : (mode === 'edit-remote' ? '保存修改' : '创建分组')}
         </button>
       </div>
