@@ -2,12 +2,10 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[cfg(target_os = "linux")]
 use std::path::Path;
-
-#[cfg(target_os = "linux")]
-use std::process::Command;
 
 pub fn get_hosts_path() -> PathBuf {
     #[cfg(target_os = "windows")]
@@ -50,12 +48,29 @@ pub fn write_hosts_file(content: &str) -> io::Result<()> {
     backup_hosts_file()?;
 
     match fs::write(&path, content) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            if let Err(error) = flush_dns_cache() {
+                eprintln!(
+                    "Warning: Failed to flush DNS cache after writing hosts: {}",
+                    error
+                );
+            }
+            Ok(())
+        }
         Err(error) => {
             #[cfg(target_os = "linux")]
             {
                 if error.kind() == io::ErrorKind::PermissionDenied {
-                    return write_hosts_file_with_pkexec(content);
+                    let result = write_hosts_file_with_pkexec(content);
+                    if result.is_ok() {
+                        if let Err(flush_error) = flush_dns_cache() {
+                            eprintln!(
+                                "Warning: Failed to flush DNS cache after pkexec write: {}",
+                                flush_error
+                            );
+                        }
+                    }
+                    return result;
                 }
             }
 
@@ -75,6 +90,48 @@ pub fn backup_hosts_file() -> io::Result<String> {
     fs::copy(&hosts_path, &backup_path)?;
 
     Ok(backup_path.to_string_lossy().to_string())
+}
+
+pub fn flush_dns_cache() -> io::Result<String> {
+    #[cfg(target_os = "windows")]
+    {
+        run_command("ipconfig", &["/flushdns"])?;
+        return Ok("DNS 缓存已刷新".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        run_command("dscacheutil", &["-flushcache"])?;
+        run_command("killall", &["-HUP", "mDNSResponder"])?;
+        return Ok("DNS 缓存已刷新".to_string());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let candidates: [(&str, &[&str]); 4] = [
+            ("resolvectl", &["flush-caches"]),
+            ("systemd-resolve", &["--flush-caches"]),
+            ("nscd", &["-i", "hosts"]),
+            ("service", &["nscd", "restart"]),
+        ];
+
+        for (program, args) in candidates {
+            if run_command(program, args).is_ok() {
+                return Ok("DNS 缓存已刷新".to_string());
+            }
+        }
+
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "当前系统未检测到可用的 DNS 刷新命令",
+        ));
+    }
+
+    #[allow(unreachable_code)]
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "当前平台暂不支持自动刷新 DNS 缓存",
+    ))
 }
 
 #[cfg(target_os = "linux")]
@@ -137,4 +194,22 @@ fn create_temp_hosts_file(content: &str) -> io::Result<PathBuf> {
     let path = std::env::temp_dir().join(filename);
     fs::write(&path, content)?;
     Ok(path)
+}
+
+fn run_command(program: &str, args: &[&str]) -> io::Result<()> {
+    let output = Command::new(program).args(args).output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let message = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("命令 {} 执行失败", program)
+        };
+        Err(io::Error::other(message))
+    }
 }

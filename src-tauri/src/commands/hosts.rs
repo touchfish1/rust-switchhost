@@ -1,7 +1,6 @@
 use crate::hosts;
 use crate::validation::validate_hosts_content;
 use serde::Serialize;
-use std::process::Command;
 
 #[derive(Debug, Serialize)]
 pub struct HostsPermissionInfo {
@@ -32,63 +31,18 @@ pub fn write_hosts_content(content: String) -> Result<(), String> {
 #[tauri::command]
 pub fn flush_dns_cache() -> Result<DnsFlushResult, String> {
     let platform = std::env::consts::OS.to_string();
-
-    #[cfg(target_os = "windows")]
-    {
-        return run_dns_flush_command(
-            "ipconfig",
-            &["/flushdns"],
-            &platform,
-            "DNS 缓存已刷新",
-            "刷新 DNS 缓存失败，请尝试以管理员身份运行应用后重试",
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        run_simple_command("dscacheutil", &["-flushcache"])?;
-        run_simple_command("killall", &["-HUP", "mDNSResponder"])?;
-        return Ok(DnsFlushResult {
+    match hosts::flush_dns_cache() {
+        Ok(message) => Ok(DnsFlushResult {
             success: true,
             platform,
-            message: "DNS 缓存已刷新".to_string(),
-        });
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let candidates: [(&str, &[&str]); 4] = [
-            ("resolvectl", &["flush-caches"]),
-            ("systemd-resolve", &["--flush-caches"]),
-            ("nscd", &["-i", "hosts"]),
-            ("service", &["nscd", "restart"]),
-        ];
-
-        for (program, args) in candidates {
-            if let Ok(result) = run_dns_flush_command(
-                program,
-                args,
-                &platform,
-                "DNS 缓存已刷新",
-                "刷新 DNS 缓存失败，请尝试使用 sudo 或 root 权限运行应用后重试",
-            ) {
-                return Ok(result);
-            }
-        }
-
-        return Ok(DnsFlushResult {
+            message,
+        }),
+        Err(error) => Ok(DnsFlushResult {
             success: false,
             platform,
-            message: "当前系统未检测到可用的 DNS 刷新命令，请手动执行 resolvectl flush-caches 或 systemd-resolve --flush-caches".to_string(),
-        });
+            message: format!("刷新 DNS 缓存失败: {}", error),
+        }),
     }
-
-    #[allow(unreachable_code)]
-    Ok(DnsFlushResult {
-        success: false,
-        platform,
-        message: "当前平台暂不支持自动刷新 DNS 缓存".to_string(),
-    })
 }
 
 #[tauri::command]
@@ -121,43 +75,5 @@ pub fn check_hosts_permission() -> HostsPermissionInfo {
         hosts_path,
         platform,
         message,
-    }
-}
-
-fn run_simple_command(program: &str, args: &[&str]) -> Result<(), String> {
-    let output = Command::new(program)
-        .args(args)
-        .output()
-        .map_err(|e| format!("执行 {} 失败: {}", program, e))?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Err(if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("命令 {} 执行失败", program)
-        })
-    }
-}
-
-fn run_dns_flush_command(
-    program: &str,
-    args: &[&str],
-    platform: &str,
-    success_message: &str,
-    failure_hint: &str,
-) -> Result<DnsFlushResult, String> {
-    match run_simple_command(program, args) {
-        Ok(()) => Ok(DnsFlushResult {
-            success: true,
-            platform: platform.to_string(),
-            message: success_message.to_string(),
-        }),
-        Err(error) => Err(format!("{}: {}", failure_hint, error)),
     }
 }
