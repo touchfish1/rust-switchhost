@@ -10,12 +10,21 @@
   import ThemeToggle from './components/ThemeToggle.svelte'
   import Modal from './components/Modal.svelte'
   import CreateSchemeModal from './components/CreateSchemeModal.svelte'
+  import BackupHistoryModal from './components/BackupHistoryModal.svelte'
   import SyncLogModal from './components/SyncLogModal.svelte'
   import CurrentHostsModal from './components/CurrentHostsModal.svelte'
   import UpdateModal from './components/UpdateModal.svelte'
   import Toast from './components/Toast.svelte'
+  import { getSchemeTemplateContent } from '$lib/data/templates'
   import { getAppVersion, restartApp } from '$lib/services/app'
-  import { checkHostsPermission as fetchHostsPermission, flushDnsCache, getHostsContent } from '$lib/services/hosts'
+  import {
+    checkHostsPermission as fetchHostsPermission,
+    flushDnsCache,
+    getHostsBackupContent,
+    getHostsContent,
+    listHostsBackups,
+    restoreHostsBackup
+  } from '$lib/services/hosts'
   import {
     getAllSchemes,
     createScheme as createSchemeRequest,
@@ -29,7 +38,7 @@
     updateSchemeRemoteConfig as updateSchemeRemoteConfigRequest
   } from '$lib/services/schemes'
   import { checkForUpdates } from '$lib/services/updater'
-  import type { Scheme, SyncLogEntry } from '$lib/types'
+  import type { HostsBackupEntry, Scheme, SyncLogEntry } from '$lib/types'
   import { appError, appVersion, hostsPermissionInfo, loadingFlags } from '$lib/stores/app'
   import {
     activeScheme as activeSchemeStore,
@@ -42,6 +51,7 @@
     setSchemes,
     upsertScheme
   } from '$lib/stores/schemes'
+  import { customTemplates, schemeTemplates } from '$lib/stores/templates'
   import { theme } from '$lib/stores/theme'
   import { toasts } from '$lib/stores/toasts'
   import { hasPendingUpdate, updater } from '$lib/stores/updater'
@@ -49,6 +59,7 @@
   let showCreateModal = false
   let showDeleteModal = false
   let showCurrentHostsModal = false
+  let showBackupHistoryModal = false
   let showSyncLogModal = false
   let createModalMode: 'create' | 'edit-remote' = 'create'
   let remoteEditTarget: Scheme | null = null
@@ -61,14 +72,21 @@
   let isImportingSchemes = false
   let isExportingSchemes = false
   let isOpeningCurrentHosts = false
+  let isOpeningBackupHistory = false
+  let isLoadingBackupContent = false
+  let isRestoringBackup = false
   let sidebarWidth = 320
   let syncLogs: SyncLogEntry[] = []
+  let backupEntries: HostsBackupEntry[] = []
+  let selectedBackupPath = ''
+  let selectedBackupContent = ''
   let syncEventUnlisten: UnlistenFn | null = null
   const syncingSchemeIds = new Set<string>()
 
   onMount(async () => {
     const savedSidebarWidth = localStorage.getItem('sidebar-width')
     theme.initialize()
+    customTemplates.initialize()
     sidebarWidth = savedSidebarWidth ? Math.min(520, Math.max(280, Number(savedSidebarWidth) || 320)) : 320
     loadingFlags.start('initial')
 
@@ -159,6 +177,26 @@
     }
   }
 
+  async function openBackupHistoryModal() {
+    try {
+      isOpeningBackupHistory = true
+      appError.set(null)
+      backupEntries = await listHostsBackups()
+      selectedBackupPath = backupEntries[0]?.path || ''
+      selectedBackupContent = ''
+      showBackupHistoryModal = true
+
+      if (selectedBackupPath) {
+        await handleSelectBackup(selectedBackupPath)
+      }
+    } catch (e) {
+      appError.set(`读取备份历史失败: ${e}`)
+      console.error('Failed to load hosts backups:', e)
+    } finally {
+      isOpeningBackupHistory = false
+    }
+  }
+
   async function handleFlushDns() {
     try {
       isFlushingDns = true
@@ -174,6 +212,46 @@
       console.error('Failed to flush DNS cache:', e)
     } finally {
       isFlushingDns = false
+    }
+  }
+
+  async function handleSelectBackup(path: string) {
+    if (!path) return
+
+    try {
+      isLoadingBackupContent = true
+      selectedBackupPath = path
+      selectedBackupContent = await getHostsBackupContent(path)
+    } catch (e) {
+      appError.set(`读取备份内容失败: ${e}`)
+      console.error('Failed to load backup content:', e)
+      selectedBackupContent = ''
+    } finally {
+      isLoadingBackupContent = false
+    }
+  }
+
+  async function handleRestoreBackup(path: string) {
+    if (!path) return
+
+    try {
+      isRestoringBackup = true
+      appError.set(null)
+      const message = await restoreHostsBackup(path)
+      await Promise.all([
+        loadSchemes(),
+        checkHostsPermission()
+      ])
+      if (showCurrentHostsModal) {
+        currentHostsContent = await getHostsContent()
+      }
+      showToast(message, 'success')
+      showBackupHistoryModal = false
+    } catch (e) {
+      appError.set(`恢复备份失败: ${e}`)
+      console.error('Failed to restore hosts backup:', e)
+    } finally {
+      isRestoringBackup = false
     }
   }
 
@@ -295,6 +373,7 @@
     remoteUrl: string
     autoSyncEnabled: boolean
     syncIntervalMinutes: string
+    templateId: string | null
   }) {
     const name = detail.name?.trim()
     const type = detail.type
@@ -302,6 +381,7 @@
     const autoSyncEnabled = Boolean(detail.autoSyncEnabled)
     const syncIntervalInput = detail.syncIntervalMinutes
     const syncIntervalMinutes = syncIntervalInput ? Number(syncIntervalInput) : null
+    const templateContent = getSchemeTemplateContent(detail.templateId)
     const currentSchemes = get(schemesStore)
 
     if (!name) return
@@ -347,7 +427,7 @@
         name,
         type === 'remote'
           ? '# 远程 URL 分组\n# 首次同步后会自动填充内容\n'
-          : '# 新的 hosts 配置\n127.0.0.1 localhost\n'
+          : templateContent || '# 新的 hosts 配置\n127.0.0.1 localhost\n'
       )
 
       if (type === 'remote') {
@@ -379,6 +459,23 @@
       isCreatingScheme = false
       loadingFlags.stop('create')
     }
+  }
+
+  function handleSaveCurrentSchemeAsTemplate() {
+    const currentScheme = get(activeSchemeStore)
+    if (!currentScheme) return
+
+    customTemplates.saveTemplate({
+      name: currentScheme.name,
+      description: `从分组「${currentScheme.name}」保存`,
+      content: get(editorContentStore)
+    })
+    showToast('已保存为自定义模板，可在新建分组时直接复用', 'success')
+  }
+
+  function handleDeleteTemplate(id: string) {
+    customTemplates.deleteTemplate(id)
+    showToast('自定义模板已删除', 'success')
   }
   
   function openDeleteModal(id: string) {
@@ -612,6 +709,9 @@
       <button class="btn-secondary" on:click={openCurrentHostsModal} disabled={isOpeningCurrentHosts}>
         {isOpeningCurrentHosts ? '读取中...' : '查看当前 Hosts'}
       </button>
+      <button class="btn-secondary" on:click={openBackupHistoryModal} disabled={isOpeningBackupHistory}>
+        {isOpeningBackupHistory ? '读取备份中...' : '备份恢复'}
+      </button>
       <ThemeToggle isDark={$theme} onToggle={handleThemeToggle} />
     </div>
   </div>
@@ -684,6 +784,9 @@
             {/if}
           </div>
           <div class="editor-actions">
+            <button class="btn-secondary" on:click={handleSaveCurrentSchemeAsTemplate}>
+              保存为模板
+            </button>
             {#if $activeSchemeStore.remote_url}
               <button class="btn-secondary" on:click={openSyncLogModal} disabled={isSyncingRemoteScheme}>
                 同步日志
@@ -726,6 +829,8 @@
       initialRemoteUrl={remoteEditTarget?.remote_url || ''}
       initialAutoSyncEnabled={remoteEditTarget?.auto_sync_enabled || false}
       initialSyncIntervalMinutes={remoteEditTarget?.sync_interval_minutes ? String(remoteEditTarget.sync_interval_minutes) : '15'}
+      templates={$schemeTemplates}
+      onDeleteTemplate={handleDeleteTemplate}
       onConfirm={handleCreateConfirm}
       onClose={() => {
         showCreateModal = false
@@ -754,6 +859,18 @@
     isOpen={showCurrentHostsModal}
     content={currentHostsContent}
     onClose={() => { showCurrentHostsModal = false }}
+  />
+
+  <BackupHistoryModal
+    isOpen={showBackupHistoryModal}
+    backups={backupEntries}
+    {selectedBackupPath}
+    {selectedBackupContent}
+    isLoadingContent={isLoadingBackupContent}
+    isRestoring={isRestoringBackup}
+    onClose={() => { showBackupHistoryModal = false }}
+    onSelectBackup={handleSelectBackup}
+    onRestoreBackup={handleRestoreBackup}
   />
 
   {#if $updater.updateInfo}

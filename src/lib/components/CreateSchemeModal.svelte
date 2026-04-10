@@ -1,12 +1,15 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
+  import type { SchemeTemplate } from '$lib/types'
+
   type ConfirmPayload = {
     name: string
     type: 'local' | 'remote'
     remoteUrl: string
     autoSyncEnabled: boolean
     syncIntervalMinutes: string
+    templateId: string | null
   }
 
   type CreateSchemeModalProps = {
@@ -18,6 +21,8 @@
     initialRemoteUrl?: string
     initialAutoSyncEnabled?: boolean
     initialSyncIntervalMinutes?: string
+    templates?: SchemeTemplate[]
+    onDeleteTemplate?: (id: string) => void
     onClose?: () => void
     onConfirm?: (payload: ConfirmPayload) => void
   }
@@ -31,6 +36,8 @@
     initialRemoteUrl = '',
     initialAutoSyncEnabled = true,
     initialSyncIntervalMinutes = '15',
+    templates = [],
+    onDeleteTemplate = () => {},
     onClose = () => {},
     onConfirm = () => {}
   }: CreateSchemeModalProps = $props()
@@ -40,7 +47,12 @@
   let remoteUrl = $state('')
   let autoSyncEnabled = $state(true)
   let syncIntervalMinutes = $state('15')
+  let selectedTemplateId = $state<string | null>('blank')
   let wasOpen = $state(false)
+
+  const selectedTemplate = $derived(
+    templates.find((template) => template.id === selectedTemplateId) ?? null
+  )
 
   $effect(() => {
     if (isOpen && !wasOpen) {
@@ -49,6 +61,7 @@
       remoteUrl = initialRemoteUrl
       autoSyncEnabled = initialAutoSyncEnabled
       syncIntervalMinutes = initialSyncIntervalMinutes
+      selectedTemplateId = templates[0]?.id ?? null
       wasOpen = true
     } else if (!isOpen && wasOpen) {
       wasOpen = false
@@ -65,7 +78,8 @@
       type: schemeType,
       remoteUrl: remoteUrl.trim(),
       autoSyncEnabled,
-      syncIntervalMinutes: syncIntervalMinutes.trim()
+      syncIntervalMinutes: syncIntervalMinutes.trim(),
+      templateId: schemeType === 'local' ? selectedTemplateId : null
     })
   }
 </script>
@@ -160,6 +174,49 @@
           <div class="tip-box">
             创建后会先保存远程配置，再立即拉取一次内容。分组启用时，后续同步成功会自动应用到系统 Hosts。
           </div>
+        {:else if mode === 'create'}
+          <div class="form-group">
+            <span>快速模板</span>
+            <div class="template-grid">
+              {#each templates as template (template.id)}
+                <button
+                  class="template-card"
+                  class:selected={selectedTemplateId === template.id}
+                  type="button"
+                  onclick={() => (selectedTemplateId = template.id)}
+                  disabled={isSubmitting}
+                >
+                  <strong>{template.name}</strong>
+                  <small>{template.description}</small>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          {#if selectedTemplate}
+            <div class="template-preview">
+              <div class="template-preview-head">
+                <div class="template-preview-copy">
+                  <strong>模板预览</strong>
+                  <span>{selectedTemplate.name}</span>
+                </div>
+                {#if selectedTemplate.source === 'custom'}
+                  <button
+                    class="template-delete-btn"
+                    type="button"
+                    onclick={() => {
+                      onDeleteTemplate(selectedTemplate.id)
+                      selectedTemplateId = templates.find((template) => template.id !== selectedTemplate.id)?.id ?? null
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    删除模板
+                  </button>
+                {/if}
+              </div>
+              <pre>{selectedTemplate.content}</pre>
+            </div>
+          {/if}
         {/if}
       </div>
 
@@ -308,6 +365,107 @@
     gap: 10px;
   }
 
+  .template-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .template-card {
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    background: var(--editor-bg, #ffffff);
+    color: var(--text-primary, #213547);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+    transition: all 0.2s ease;
+  }
+
+  .template-card strong {
+    font-size: 14px;
+  }
+
+  .template-card small {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary, #8c8c8c);
+  }
+
+  .template-card:hover,
+  .template-card.selected {
+    border-color: var(--primary-color, #1890ff);
+    background: var(--hover-bg, #e6f7ff);
+  }
+
+  .template-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    background: var(--sidebar-bg, #f5f5f5);
+  }
+
+  .template-preview-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .template-preview-head strong {
+    font-size: 14px;
+    color: var(--text-primary, #213547);
+  }
+
+  .template-preview-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .template-preview-head span {
+    font-size: 12px;
+    color: var(--text-secondary, #8c8c8c);
+  }
+
+  .template-delete-btn {
+    padding: 7px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 77, 79, 0.28);
+    background: rgba(255, 77, 79, 0.08);
+    color: #cf1322;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .template-delete-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .template-preview pre {
+    margin: 0;
+    max-height: 220px;
+    overflow: auto;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--editor-bg, #ffffff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    color: var(--text-primary, #213547);
+    font-family: var(--font-family-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
   .tip-box {
     padding: 12px 14px;
     border-radius: 10px;
@@ -356,6 +514,15 @@
   @media (max-width: 640px) {
     .type-grid {
       grid-template-columns: 1fr;
+    }
+
+    .template-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .template-preview-head {
+      flex-direction: column;
+      align-items: flex-start;
     }
   }
 </style>

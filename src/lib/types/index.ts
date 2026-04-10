@@ -42,11 +42,29 @@ export interface DnsFlushResult {
   message: string
 }
 
+export interface HostsBackupEntry {
+  filename: string
+  path: string
+  created_at: string
+  size_bytes: number
+  line_count: number
+  host_entry_count: number
+  comment_count: number
+}
+
 export interface SyncLogEntry {
   timestamp: string
   status: string
   trigger: string
   message: string
+}
+
+export interface SchemeTemplate {
+  id: string
+  name: string
+  description: string
+  content: string
+  source?: 'builtin' | 'custom'
 }
 
 export type UpdaterHandle = Update | null

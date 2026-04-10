@@ -29,6 +29,21 @@ pub fn write_hosts_content(content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn list_hosts_backups() -> Result<Vec<hosts::HostsBackupEntry>, String> {
+    list_hosts_backups_impl().into_command_result()
+}
+
+#[tauri::command]
+pub fn get_hosts_backup_content(path: String) -> Result<String, String> {
+    get_hosts_backup_content_impl(path).into_command_result()
+}
+
+#[tauri::command]
+pub fn restore_hosts_backup(path: String) -> Result<String, String> {
+    restore_hosts_backup_impl(path).into_command_result()
+}
+
+#[tauri::command]
 pub fn flush_dns_cache() -> Result<DnsFlushResult, String> {
     let platform = std::env::consts::OS.to_string();
     match hosts::flush_dns_cache() {
@@ -85,4 +100,17 @@ fn get_hosts_content_impl() -> AppResult<String> {
 fn write_hosts_content_impl(content: String) -> AppResult<()> {
     validate_hosts_content(&content)?;
     Ok(hosts::write_hosts_file(&content)?)
+}
+
+fn list_hosts_backups_impl() -> AppResult<Vec<hosts::HostsBackupEntry>> {
+    Ok(hosts::list_backup_files()?)
+}
+
+fn get_hosts_backup_content_impl(path: String) -> AppResult<String> {
+    Ok(hosts::read_backup_file(&path)?)
+}
+
+fn restore_hosts_backup_impl(path: String) -> AppResult<String> {
+    hosts::restore_backup_file(&path)?;
+    Ok("已恢复所选备份并重新写入系统 Hosts".to_string())
 }

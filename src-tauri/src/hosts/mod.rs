@@ -7,6 +7,17 @@ use std::process::Command;
 #[cfg(target_os = "linux")]
 use std::path::Path;
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HostsBackupEntry {
+    pub filename: String,
+    pub path: String,
+    pub created_at: String,
+    pub size_bytes: u64,
+    pub line_count: u64,
+    pub host_entry_count: u64,
+    pub comment_count: u64,
+}
+
 pub fn get_hosts_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
@@ -90,6 +101,64 @@ pub fn backup_hosts_file() -> io::Result<String> {
     fs::copy(&hosts_path, &backup_path)?;
 
     Ok(backup_path.to_string_lossy().to_string())
+}
+
+pub fn list_backup_files() -> io::Result<Vec<HostsBackupEntry>> {
+    let backup_dir = get_backup_dir();
+    if !backup_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut backups = Vec::new();
+
+    for entry in fs::read_dir(&backup_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(extension) = path.extension() else {
+            continue;
+        };
+
+        if extension != "bak" {
+            continue;
+        }
+
+        let metadata = entry.metadata()?;
+        let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        let created_at = chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339();
+
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let summary = summarize_hosts_content(&content);
+
+        backups.push(HostsBackupEntry {
+            filename: path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unknown.bak".to_string()),
+            path: path.to_string_lossy().to_string(),
+            created_at,
+            size_bytes: metadata.len(),
+            line_count: summary.line_count,
+            host_entry_count: summary.host_entry_count,
+            comment_count: summary.comment_count,
+        });
+    }
+
+    backups.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    Ok(backups)
+}
+
+pub fn read_backup_file(path: &str) -> io::Result<String> {
+    let backup_path = resolve_backup_path(path)?;
+    fs::read_to_string(backup_path)
+}
+
+pub fn restore_backup_file(path: &str) -> io::Result<()> {
+    let content = read_backup_file(path)?;
+    write_hosts_file(&content)
 }
 
 pub fn flush_dns_cache() -> io::Result<String> {
@@ -211,5 +280,75 @@ fn run_command(program: &str, args: &[&str]) -> io::Result<()> {
             format!("命令 {} 执行失败", program)
         };
         Err(io::Error::other(message))
+    }
+}
+
+fn resolve_backup_path(path: &str) -> io::Result<PathBuf> {
+    let candidate = PathBuf::from(path);
+    let requested = fs::canonicalize(&candidate)?;
+    let backup_dir = fs::canonicalize(get_backup_dir())?;
+
+    if !requested.starts_with(&backup_dir) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "只能访问备份目录内的文件",
+        ));
+    }
+
+    if requested.extension().and_then(|extension| extension.to_str()) != Some("bak") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "仅支持恢复 .bak 备份文件",
+        ));
+    }
+
+    Ok(requested)
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct HostsContentSummary {
+    line_count: u64,
+    host_entry_count: u64,
+    comment_count: u64,
+}
+
+fn summarize_hosts_content(content: &str) -> HostsContentSummary {
+    let mut summary = HostsContentSummary::default();
+
+    for line in content.lines() {
+        summary.line_count += 1;
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.starts_with('#') {
+            summary.comment_count += 1;
+            continue;
+        }
+
+        let segments: Vec<&str> = trimmed.split_whitespace().collect();
+        if segments.len() >= 2 {
+            summary.host_entry_count += 1;
+        }
+    }
+
+    summary
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summarize_hosts_content;
+
+    #[test]
+    fn summarizes_hosts_backup_content() {
+        let summary = summarize_hosts_content(
+            "# comment\n127.0.0.1 localhost\n\n192.168.1.1 intranet.local # inline\n# second\n",
+        );
+
+        assert_eq!(summary.line_count, 5);
+        assert_eq!(summary.host_entry_count, 2);
+        assert_eq!(summary.comment_count, 2);
     }
 }
