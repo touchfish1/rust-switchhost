@@ -24,16 +24,10 @@ stages:
         notify: []
         strategy:
           retry: '0'
-  - name: stage-c6daa8d4
-    displayName: 未命名
-    strategy: naturally
-    trigger: auto
-    executor: []
-    steps:
       - step: build@nodejs
         name: build_nodejs
         displayName: Nodejs 构建
-        nodeVersion: 24.5.0
+        nodeVersion: 22.22.0
         commands:
           - '# 设置NPM源，提升安装速度'
           - npm config set registry https://registry.npmmirror.com
