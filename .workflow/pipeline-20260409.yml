@@ -20,6 +20,16 @@ stages:
         rustVersion: '1.79'
         commands:
           - cargo --version
+          - ''
+          - apt update && apt install -y node24
+          - ''
+          - npm -v
+          - ''
+          - '# 设置NPM源，提升安装速度'
+          - npm config set registry https://registry.npmmirror.com
+          - ''
+          - '# 执行编译命令'
+          - npm install && npm run tauri build
         caches: []
         notify: []
         strategy:
