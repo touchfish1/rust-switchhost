@@ -9,7 +9,7 @@ triggers:
         - v*
 stages:
   - name: stage-24488044
-    displayName: 未命名
+    displayName: 构建
     strategy: naturally
     trigger: auto
     executor: []
@@ -44,3 +44,4 @@ stages:
         notify: []
         strategy:
           retry: '0'
+        dependsOn: build_rust
