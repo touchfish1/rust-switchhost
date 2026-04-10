@@ -21,9 +21,12 @@ stages:
         commands:
           - cargo --version
           - ''
-          - apt update && apt install -y nodejs
-          - ''
-          - npm -v
+          - apt update && apt install -y curl
+          - curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+          - source $HOME/.bashrc
+          - 'nvm install 24  # 安装 Node 20'
+          - nvm use 24
+          - node -v
           - ''
           - '# 设置NPM源，提升安装速度'
           - npm config set registry https://registry.npmmirror.com
