@@ -8,8 +8,8 @@ triggers:
       prefix:
         - v*
 stages:
-  - name: stage-c6daa8d4
-    displayName: 未命名
+  - name: stage-24488044
+    displayName: 构建
     strategy: naturally
     trigger: auto
     executor: []
@@ -17,14 +17,46 @@ stages:
       - step: build@rust
         name: build_rust
         displayName: Rust 构建
-        rustVersion: '1.69'
+        rustVersion: '1.93'
         commands:
-          - cargo build
-        artifacts:
-          - name: BUILD_ARTIFACT
-            path:
-              - ./target
+          - cargo --version
+          - ''
+          - apt-get update -y
+          - apt-get install -y curl gnupg ca-certificates
+          - curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg
+          - echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
+          - apt-get update -y
+          - apt-get install -y nodejs
+          - node -v
+          - npm -v
+          - ''
+          - '# 设置NPM源，提升安装速度'
+          - npm config set registry https://registry.npmmirror.com
+          - ''
+          - '# 执行编译命令'
+          - npm install && npm run tauri build
         caches: []
         notify: []
         strategy:
           retry: '0'
+      - step: build@nodejs
+        name: build_nodejs
+        displayName: Nodejs 构建
+        nodeVersion: 22.22.0
+        commands:
+          - '# 设置NPM源，提升安装速度'
+          - npm config set registry https://registry.npmmirror.com
+          - ''
+          - '# 执行编译命令'
+          - npm install && npm run tauri build
+        artifacts:
+          - name: BUILD_ARTIFACT
+            path:
+              - ./dist
+        caches:
+          - ~/.npm
+          - ~/.yarn
+        notify: []
+        strategy:
+          retry: '0'
+        dependsOn: build_rust
