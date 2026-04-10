@@ -14,17 +14,23 @@ stages:
     trigger: auto
     executor: []
     steps:
-      - step: build@rust
-        name: build_rust
-        displayName: Rust 构建
-        rustVersion: '1.69'
+      - step: build@nodejs
+        name: build_nodejs
+        displayName: Nodejs 构建
+        nodeVersion: 14.16.0
         commands:
-          - cargo build
+          - '# 设置NPM源，提升安装速度'
+          - npm config set registry https://registry.npmmirror.com
+          - ''
+          - '# 执行编译命令'
+          - npm install && npm run tauri build
         artifacts:
           - name: BUILD_ARTIFACT
             path:
-              - ./target
-        caches: []
+              - ./dist
+        caches:
+          - ~/.npm
+          - ~/.yarn
         notify: []
         strategy:
           retry: '0'
