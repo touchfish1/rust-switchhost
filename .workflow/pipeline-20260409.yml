@@ -20,10 +20,6 @@ stages:
         rustVersion: '1.79'
         commands:
           - cargo --version
-        artifacts:
-          - name: BUILD_ARTIFACT
-            path:
-              - ./target
         caches: []
         notify: []
         strategy:
