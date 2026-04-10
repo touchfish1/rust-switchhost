@@ -17,7 +17,7 @@ stages:
       - step: build@rust
         name: build_rust
         displayName: Rust 构建
-        rustVersion: '1.79'
+        rustVersion: '1.93'
         commands:
           - cargo --version
           - ''
