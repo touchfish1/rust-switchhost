@@ -2,6 +2,8 @@
 
 一个跨平台的 Hosts 文件管理和快速切换工具，使用 Rust + Tauri 2.x + Svelte 构建。
 
+[English README](./README_EN.md)
+
 ## ✨ 特性
 
 - 🚀 **轻量高效**：基于 Tauri 2.x，应用体积小，内存占用低
