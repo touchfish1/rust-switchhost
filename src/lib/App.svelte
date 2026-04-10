@@ -48,6 +48,12 @@
     platform: string
     message: string
   }
+
+  interface DnsFlushResult {
+    success: boolean
+    platform: string
+    message: string
+  }
   
   let schemes: Scheme[] = []
   let activeSchemeId: string | null = null
@@ -71,6 +77,7 @@
   let updateInfo: UpdateInfo | null = null
   let availableUpdate: Update | null = null
   let isInstallingUpdate = false
+  let isFlushingDns = false
   let updateProgressText = ''
   let hasPendingUpdate = false
   let updateCheckTimer: ReturnType<typeof setInterval> | null = null
@@ -206,6 +213,24 @@
       console.error('Failed to get current hosts content:', e)
     } finally {
       isLoading = false
+    }
+  }
+
+  async function handleFlushDns() {
+    try {
+      isFlushingDns = true
+      error = null
+      const result = await invoke<DnsFlushResult>('flush_dns_cache')
+      if (result.success) {
+        showSuccessToast(result.message)
+      } else {
+        error = result.message
+      }
+    } catch (e) {
+      error = `刷新 DNS 缓存失败: ${e}`
+      console.error('Failed to flush DNS cache:', e)
+    } finally {
+      isFlushingDns = false
     }
   }
 
@@ -683,6 +708,9 @@
         disabled={isLoading}
       >
         检查更新
+      </button>
+      <button class="btn-secondary" on:click={handleFlushDns} disabled={isLoading || isFlushingDns}>
+        {isFlushingDns ? '刷新 DNS 中...' : '刷新 DNS'}
       </button>
       <button class="btn-secondary" on:click={openCurrentHostsModal} disabled={isLoading}>
         查看当前 Hosts

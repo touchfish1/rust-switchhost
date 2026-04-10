@@ -44,6 +44,7 @@ pub fn run() {
             commands::hosts::check_hosts_permission,
             commands::hosts::get_hosts_content,
             commands::hosts::write_hosts_content,
+            commands::hosts::flush_dns_cache,
             commands::schemes::get_all_schemes,
             commands::schemes::create_scheme,
             commands::schemes::update_scheme,
