@@ -2,6 +2,7 @@ use crate::error::{AppResult, IntoCommandResult};
 use crate::hosts;
 use crate::validation::validate_hosts_content;
 use serde::Serialize;
+use std::net::ToSocketAddrs;
 
 #[derive(Debug, Serialize)]
 pub struct HostsPermissionInfo {
@@ -15,6 +16,14 @@ pub struct HostsPermissionInfo {
 pub struct DnsFlushResult {
     pub success: bool,
     pub platform: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DnsLookupResult {
+    pub domain: String,
+    pub success: bool,
+    pub addresses: Vec<String>,
     pub message: String,
 }
 
@@ -41,6 +50,11 @@ pub fn get_hosts_backup_content(path: String) -> Result<String, String> {
 #[tauri::command]
 pub fn restore_hosts_backup(path: String) -> Result<String, String> {
     restore_hosts_backup_impl(path).into_command_result()
+}
+
+#[tauri::command]
+pub fn resolve_domain(domain: String) -> Result<DnsLookupResult, String> {
+    resolve_domain_impl(domain).into_command_result()
 }
 
 #[tauri::command]
@@ -113,4 +127,41 @@ fn get_hosts_backup_content_impl(path: String) -> AppResult<String> {
 fn restore_hosts_backup_impl(path: String) -> AppResult<String> {
     hosts::restore_backup_file(&path)?;
     Ok("已恢复所选备份并重新写入系统 Hosts".to_string())
+}
+
+fn resolve_domain_impl(domain: String) -> AppResult<DnsLookupResult> {
+    let normalized = domain.trim().to_string();
+    if normalized.is_empty() {
+        return Ok(DnsLookupResult {
+            domain: normalized,
+            success: false,
+            addresses: Vec::new(),
+            message: "请输入要诊断的域名".to_string(),
+        });
+    }
+
+    match (normalized.as_str(), 0).to_socket_addrs() {
+        Ok(addresses) => {
+            let mut resolved: Vec<String> = addresses.map(|address| address.ip().to_string()).collect();
+            resolved.sort();
+            resolved.dedup();
+
+            Ok(DnsLookupResult {
+                domain: normalized,
+                success: !resolved.is_empty(),
+                message: if resolved.is_empty() {
+                    "未解析到任何 IP 地址".to_string()
+                } else {
+                    format!("共解析到 {} 个唯一 IP 地址", resolved.len())
+                },
+                addresses: resolved,
+            })
+        }
+        Err(error) => Ok(DnsLookupResult {
+            domain: normalized,
+            success: false,
+            addresses: Vec::new(),
+            message: format!("解析失败: {}", error),
+        }),
+    }
 }

@@ -11,6 +11,7 @@
   import Modal from './components/Modal.svelte'
   import CreateSchemeModal from './components/CreateSchemeModal.svelte'
   import BackupHistoryModal from './components/BackupHistoryModal.svelte'
+  import DnsDiagnosticModal from './components/DnsDiagnosticModal.svelte'
   import SyncLogModal from './components/SyncLogModal.svelte'
   import CurrentHostsModal from './components/CurrentHostsModal.svelte'
   import UpdateModal from './components/UpdateModal.svelte'
@@ -23,6 +24,7 @@
     getHostsBackupContent,
     getHostsContent,
     listHostsBackups,
+    resolveDomain,
     restoreHostsBackup
   } from '$lib/services/hosts'
   import {
@@ -38,7 +40,7 @@
     updateSchemeRemoteConfig as updateSchemeRemoteConfigRequest
   } from '$lib/services/schemes'
   import { checkForUpdates } from '$lib/services/updater'
-  import type { HostsBackupEntry, Scheme, SyncLogEntry } from '$lib/types'
+  import type { DnsLookupResult, HostsBackupEntry, Scheme, SyncLogEntry } from '$lib/types'
   import { appError, appVersion, hostsPermissionInfo, loadingFlags } from '$lib/stores/app'
   import {
     activeScheme as activeSchemeStore,
@@ -60,6 +62,7 @@
   let showDeleteModal = false
   let showCurrentHostsModal = false
   let showBackupHistoryModal = false
+  let showDnsDiagnosticModal = false
   let showSyncLogModal = false
   let createModalMode: 'create' | 'edit-remote' = 'create'
   let remoteEditTarget: Scheme | null = null
@@ -73,6 +76,7 @@
   let isExportingSchemes = false
   let isOpeningCurrentHosts = false
   let isOpeningBackupHistory = false
+  let isResolvingDns = false
   let isLoadingBackupContent = false
   let isRestoringBackup = false
   let sidebarWidth = 320
@@ -80,6 +84,8 @@
   let backupEntries: HostsBackupEntry[] = []
   let selectedBackupPath = ''
   let selectedBackupContent = ''
+  let diagnosticDomain = ''
+  let dnsLookupResult: DnsLookupResult | null = null
   let syncEventUnlisten: UnlistenFn | null = null
   const syncingSchemeIds = new Set<string>()
 
@@ -212,6 +218,24 @@
       console.error('Failed to flush DNS cache:', e)
     } finally {
       isFlushingDns = false
+    }
+  }
+
+  function openDnsDiagnosticModal() {
+    showDnsDiagnosticModal = true
+    dnsLookupResult = null
+  }
+
+  async function handleResolveDomain() {
+    try {
+      isResolvingDns = true
+      appError.set(null)
+      dnsLookupResult = await resolveDomain(diagnosticDomain)
+    } catch (e) {
+      appError.set(`DNS 诊断失败: ${e}`)
+      console.error('Failed to resolve domain:', e)
+    } finally {
+      isResolvingDns = false
     }
   }
 
@@ -712,6 +736,9 @@
       <button class="btn-secondary" on:click={openBackupHistoryModal} disabled={isOpeningBackupHistory}>
         {isOpeningBackupHistory ? '读取备份中...' : '备份恢复'}
       </button>
+      <button class="btn-secondary" on:click={openDnsDiagnosticModal}>
+        DNS 诊断
+      </button>
       <ThemeToggle isDark={$theme} onToggle={handleThemeToggle} />
     </div>
   </div>
@@ -871,6 +898,16 @@
     onClose={() => { showBackupHistoryModal = false }}
     onSelectBackup={handleSelectBackup}
     onRestoreBackup={handleRestoreBackup}
+  />
+
+  <DnsDiagnosticModal
+    isOpen={showDnsDiagnosticModal}
+    domain={diagnosticDomain}
+    lookupResult={dnsLookupResult}
+    isResolving={isResolvingDns}
+    onClose={() => { showDnsDiagnosticModal = false }}
+    onDomainChange={(value) => { diagnosticDomain = value }}
+    onResolve={handleResolveDomain}
   />
 
   {#if $updater.updateInfo}

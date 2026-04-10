@@ -42,6 +42,13 @@ export interface DnsFlushResult {
   message: string
 }
 
+export interface DnsLookupResult {
+  domain: string
+  success: boolean
+  addresses: string[]
+  message: string
+}
+
 export interface HostsBackupEntry {
   filename: string
   path: string

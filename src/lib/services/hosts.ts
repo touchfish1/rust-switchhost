@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { DnsFlushResult, HostsBackupEntry, HostsPermissionInfo } from '$lib/types'
+import type { DnsFlushResult, DnsLookupResult, HostsBackupEntry, HostsPermissionInfo } from '$lib/types'
 
 export function checkHostsPermission() {
   return invoke<HostsPermissionInfo>('check_hosts_permission')
@@ -23,4 +23,8 @@ export function getHostsBackupContent(path: string) {
 
 export function restoreHostsBackup(path: string) {
   return invoke<string>('restore_hosts_backup', { path })
+}
+
+export function resolveDomain(domain: string) {
+  return invoke<DnsLookupResult>('resolve_domain', { domain })
 }

@@ -50,6 +50,7 @@ pub fn run() {
             commands::hosts::list_hosts_backups,
             commands::hosts::get_hosts_backup_content,
             commands::hosts::restore_hosts_backup,
+            commands::hosts::resolve_domain,
             commands::schemes::get_all_schemes,
             commands::schemes::create_scheme,
             commands::schemes::update_scheme,
