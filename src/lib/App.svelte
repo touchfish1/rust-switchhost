@@ -134,6 +134,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   let previewCurrentStats: HostsContentStats = { lineCount: 0, hostEntryCount: 0, commentCount: 0 }
   let previewMergedStats: HostsContentStats = { lineCount: 0, hostEntryCount: 0, commentCount: 0 }
   let previewDiffSummary: HostsDiffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
+  let previewDiffLines: HostsDiffLine[] = []
   let mergedPreviewConflicts: HostsConflictGroup[] = []
   let activeSchemeConflicts: HostsConflictGroup[] = []
   let deleteTargetScheme: Scheme | null = null
@@ -183,6 +184,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   $: previewCurrentStats = summarizeHostsContent(mergedPreviewCurrentContent)
   $: previewMergedStats = summarizeHostsContent(previewMergedHostsContent)
   $: previewDiffSummary = summarizeHostsDiff(mergedPreviewCurrentContent, previewMergedHostsContent)
+  $: previewDiffLines = collectHostsDiffLines(mergedPreviewCurrentContent, previewMergedHostsContent)
   $: deleteTargetScheme = $schemesStore.find((scheme) => scheme.id === deleteTargetId) || null
   $: {
     const analysis = analyzeHostsContent($editorContentStore)
@@ -1483,6 +1485,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     currentStats={previewCurrentStats}
     mergedStats={previewMergedStats}
     diffSummary={previewDiffSummary}
+    diffLines={previewDiffLines}
     conflicts={mergedPreviewConflicts}
     onClose={() => { showMergedPreviewModal = false }}
   />

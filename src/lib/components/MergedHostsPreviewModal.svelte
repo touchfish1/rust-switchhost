@@ -1,6 +1,6 @@
 <script lang="ts">
   import Editor from './Editor.svelte'
-  import type { HostsConflictGroup, HostsContentStats, HostsDiffSummary, Scheme } from '$lib/types'
+  import type { HostsConflictGroup, HostsContentStats, HostsDiffLine, HostsDiffSummary, Scheme } from '$lib/types'
   import { toasts } from '$lib/stores/toasts'
 
   export let isOpen = false
@@ -12,8 +12,10 @@
   export let currentStats: HostsContentStats
   export let mergedStats: HostsContentStats
   export let diffSummary: HostsDiffSummary
+  export let diffLines: HostsDiffLine[] = []
   export let conflicts: HostsConflictGroup[] = []
   export let onClose: () => void
+  let showOnlyDiff = false
 
   async function copyMergedContent() {
     try {
@@ -23,6 +25,13 @@
       console.error('Failed to copy merged hosts content:', error)
       toasts.push('复制失败，请检查系统剪贴板权限', 'error')
     }
+  }
+
+  function buildDiffPreview(kind: 'added' | 'removed') {
+    return diffLines
+      .filter((item) => item.kind === kind)
+      .map((item) => item.value)
+      .join('\n')
   }
 </script>
 
@@ -115,21 +124,29 @@
       <div class="preview-body">
         <section class="preview-panel">
           <div class="preview-panel-head">
-            <h4>当前系统 Hosts</h4>
-            <span>用于对比真实文件内容</span>
+            <div>
+              <h4>当前系统 Hosts</h4>
+              <span>用于对比真实文件内容</span>
+            </div>
+            <label class="diff-toggle">
+              <input type="checkbox" bind:checked={showOnlyDiff} />
+              <span>只看变更行</span>
+            </label>
           </div>
           <div class="preview-editor">
-            <Editor content={currentContent} readOnly={true} />
+            <Editor content={showOnlyDiff ? buildDiffPreview('removed') : currentContent} readOnly={true} />
           </div>
         </section>
 
         <section class="preview-panel">
           <div class="preview-panel-head">
-            <h4>预计合并结果</h4>
-            <span>这是启用分组最终写入的内容</span>
+            <div>
+              <h4>预计合并结果</h4>
+              <span>这是启用分组最终写入的内容</span>
+            </div>
           </div>
           <div class="preview-editor">
-            <Editor content={mergedContent} readOnly={true} />
+            <Editor content={showOnlyDiff ? buildDiffPreview('added') : mergedContent} readOnly={true} />
           </div>
         </section>
       </div>
@@ -405,8 +422,9 @@
     padding: 14px 16px;
     border-bottom: 1px solid var(--border-color);
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
   }
 
   .preview-panel-head h4 {
@@ -418,6 +436,15 @@
   .preview-panel-head span {
     font-size: 12px;
     color: var(--text-secondary);
+  }
+
+  .diff-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
   }
 
   .preview-editor {
@@ -442,6 +469,11 @@
     .preview-header-actions {
       width: 100%;
       justify-content: space-between;
+    }
+
+    .preview-panel-head {
+      flex-direction: column;
+      align-items: flex-start;
     }
   }
 </style>

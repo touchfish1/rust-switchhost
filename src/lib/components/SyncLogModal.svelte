@@ -17,11 +17,29 @@
     onClose = undefined
   }: SyncLogModalProps = $props()
   let filter = $state<'all' | 'success' | 'error'>('all')
+  let keyword = $state('')
   let copiedMessage = $state('')
 
-  const filteredLogs = $derived(
-    filter === 'all' ? logs : logs.filter((log) => log.status === filter)
-  )
+  const filteredLogs = $derived.by(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase()
+
+    return logs.filter((log) => {
+      const matchesStatus = filter === 'all' || log.status === filter
+      if (!matchesStatus) return false
+      if (!normalizedKeyword) return true
+
+      const haystack = [
+        log.message,
+        formatTrigger(log.trigger),
+        log.status === 'success' ? '成功' : '失败',
+        new Date(log.timestamp).toLocaleString()
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      return haystack.includes(normalizedKeyword)
+    })
+  })
 
   function closeModal() {
     onClose?.()
@@ -43,6 +61,33 @@
 
     await navigator.clipboard.writeText(payload)
     copiedMessage = '已复制该条日志'
+    setTimeout(() => {
+      copiedMessage = ''
+    }, 1800)
+  }
+
+  async function copyFilteredLogs() {
+    const payload = filteredLogs
+      .map((log) =>
+        [
+          `时间: ${new Date(log.timestamp).toLocaleString()}`,
+          `状态: ${log.status === 'success' ? '成功' : '失败'}`,
+          `触发: ${formatTrigger(log.trigger)}`,
+          `消息: ${log.message}`
+        ].join('\n')
+      )
+      .join('\n\n')
+
+    if (!payload) {
+      copiedMessage = '当前筛选结果为空'
+      setTimeout(() => {
+        copiedMessage = ''
+      }, 1800)
+      return
+    }
+
+    await navigator.clipboard.writeText(payload)
+    copiedMessage = `已复制 ${filteredLogs.length} 条筛选日志`
     setTimeout(() => {
       copiedMessage = ''
     }, 1800)
@@ -75,6 +120,13 @@
             <button class:selected={filter === 'success'} onclick={() => (filter = 'success')}>成功</button>
             <button class:selected={filter === 'error'} onclick={() => (filter = 'error')}>失败</button>
           </div>
+          <input
+            class="search-input"
+            type="text"
+            bind:value={keyword}
+            placeholder="按时间、状态、触发方式或消息搜索"
+          />
+          <button class="copy-btn" onclick={copyFilteredLogs}>复制当前筛选结果</button>
           {#if copiedMessage}
             <span class="copied-hint">{copiedMessage}</span>
           {/if}
@@ -182,6 +234,24 @@
   .filter-group {
     display: flex;
     gap: 8px;
+  }
+
+  .search-input {
+    min-width: min(320px, 100%);
+    flex: 1;
+    height: 34px;
+    border-radius: 999px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    background: var(--editor-bg, #ffffff);
+    color: var(--text-primary, #213547);
+    padding: 0 14px;
+    font-size: 12px;
+  }
+
+  .search-input:focus {
+    outline: none;
+    border-color: var(--primary-color, #1890ff);
+    box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.12);
   }
 
   .filter-group button,
