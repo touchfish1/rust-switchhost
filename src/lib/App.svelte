@@ -22,6 +22,8 @@ import Toast from './components/Toast.svelte'
 import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/templates'
   import {
     buildMergedHostsContent,
+    collectAffectedDomains,
+    collectHostsDiffLines,
     detectHostsConflicts,
     summarizeHostsContent,
     summarizeHostsDiff
@@ -142,6 +144,8 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   let remoteSyncPreviewScheme: Scheme | null = null
   let remoteSyncPreviewContent = ''
   let remoteSyncPreviewDiff: HostsDiffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
+  let remoteSyncPreviewAffectedDomains = []
+  let showWriteResultDetails = false
   const QUICK_START_STORAGE_KEY = 'quick-start-guide-dismissed-v1'
   const editorTips = [
     '格式：IP 域名1 域名2',
@@ -414,8 +418,11 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
         title: enabled ? '分组已启用并写入系统 Hosts' : '分组已停用并重新写入系统 Hosts',
         description: enabled ? '下面是这次实际写入带来的变更摘要。' : '下面是停用后重新计算得到的变更摘要。',
         diff: summarizeHostsDiff(beforeContent, afterContent),
+        diffLines: collectHostsDiffLines(beforeContent, afterContent),
+        affectedDomains: collectAffectedDomains(beforeContent, afterContent),
         timestamp: new Date().toISOString()
       }
+      showWriteResultDetails = false
       showToast(enabled ? '分组已启用并生效' : '分组已停用并生效', 'success')
       if (enabled && conflicts.length > 0) {
         showToast(`检测到 ${conflicts.length} 个域名冲突，建议查看“合并预览”`, 'warning', 3200)
@@ -825,8 +832,11 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
             title: '远程分组已同步并写入系统 Hosts',
             description: '下面是这次同步后实际写入带来的变更摘要。',
             diff: summarizeHostsDiff(beforeContent, afterContent),
+            diffLines: collectHostsDiffLines(beforeContent, afterContent),
+            affectedDomains: collectAffectedDomains(beforeContent, afterContent),
             timestamp: new Date().toISOString()
           }
+          showWriteResultDetails = false
         }
         showToast('远程分组同步成功', 'success')
       }
@@ -855,6 +865,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       remoteSyncPreviewScheme = currentScheme
       remoteSyncPreviewContent = await fetchRemoteHostsRequest(currentScheme.remote_url)
       remoteSyncPreviewDiff = summarizeHostsDiff(currentScheme.content, remoteSyncPreviewContent)
+      remoteSyncPreviewAffectedDomains = collectAffectedDomains(currentScheme.content, remoteSyncPreviewContent)
       showRemoteSyncPreviewModal = true
     } catch (e) {
       appError.set(`拉取远程预览失败: ${e}`)
@@ -877,6 +888,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       remoteSyncPreviewScheme = null
       remoteSyncPreviewContent = ''
       remoteSyncPreviewDiff = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
+      remoteSyncPreviewAffectedDomains = []
     }
   }
 
@@ -1095,6 +1107,23 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
           新增 {writeResultSummary.diff.addedLines} 行 · 移除 {writeResultSummary.diff.removedLines} 行 · 保留 {writeResultSummary.diff.unchangedLines} 行
           · {new Date(writeResultSummary.timestamp).toLocaleTimeString()}
         </small>
+        {#if writeResultSummary.affectedDomains.length > 0}
+          <div class="write-result-domains">
+            {#each writeResultSummary.affectedDomains as item}
+              <span class={`write-domain-chip ${item.change}`}>
+                {item.domain} · {item.change === 'added' ? '新增' : item.change === 'removed' ? '移除' : '更新'}
+              </span>
+            {/each}
+          </div>
+        {/if}
+        <button class="write-result-toggle" on:click={() => { showWriteResultDetails = !showWriteResultDetails }}>
+          {showWriteResultDetails ? '收起详细 diff' : '展开详细 diff'}
+        </button>
+        {#if showWriteResultDetails && writeResultSummary.diffLines.length > 0}
+          <pre class="write-result-diff">
+{writeResultSummary.diffLines.map((item) => `${item.kind === 'added' ? '+' : '-'} ${item.value}`).join('\n')}
+          </pre>
+        {/if}
       </div>
       <button on:click={() => { writeResultSummary = null }}>×</button>
     </div>
@@ -1417,6 +1446,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     currentContent={remoteSyncPreviewScheme?.content || ''}
     remoteContent={remoteSyncPreviewContent}
     diffSummary={remoteSyncPreviewDiff}
+    affectedDomains={remoteSyncPreviewAffectedDomains}
     isLoading={isLoadingRemoteSyncPreview}
     isApplying={isApplyingRemoteSyncPreview}
     onClose={() => {
@@ -1425,6 +1455,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       remoteSyncPreviewScheme = null
       remoteSyncPreviewContent = ''
       remoteSyncPreviewDiff = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
+      remoteSyncPreviewAffectedDomains = []
     }}
     onConfirm={confirmRemoteSyncPreview}
   />
@@ -1644,6 +1675,60 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     color: inherit;
     font-size: 20px;
     cursor: pointer;
+  }
+
+  .write-result-domains {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .write-domain-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid rgba(35, 120, 4, 0.18);
+    background: rgba(255, 255, 255, 0.55);
+    color: #237804;
+  }
+
+  .write-domain-chip.removed {
+    color: #cf1322;
+    border-color: rgba(255, 77, 79, 0.24);
+    background: rgba(255, 77, 79, 0.08);
+  }
+
+  .write-domain-chip.updated {
+    color: #0958d9;
+    border-color: rgba(24, 144, 255, 0.24);
+    background: rgba(24, 144, 255, 0.08);
+  }
+
+  .write-result-toggle {
+    align-self: flex-start;
+    padding: 0;
+    font-size: 13px !important;
+    font-weight: 600;
+    text-decoration: underline;
+  }
+
+  .write-result-diff {
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(35, 120, 4, 0.18);
+    background: rgba(255, 255, 255, 0.65);
+    color: #1f1f1f;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow: auto;
   }
 
   .permission-banner div {

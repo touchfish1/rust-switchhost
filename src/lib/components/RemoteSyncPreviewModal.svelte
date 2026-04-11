@@ -1,6 +1,6 @@
 <script lang="ts">
   import Editor from './Editor.svelte'
-  import type { HostsDiffSummary } from '$lib/types'
+  import type { HostsAffectedDomain, HostsDiffSummary } from '$lib/types'
 
   export let isOpen = false
   export let schemeName = ''
@@ -8,6 +8,7 @@
   export let currentContent = ''
   export let remoteContent = ''
   export let diffSummary: HostsDiffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
+  export let affectedDomains: HostsAffectedDomain[] = []
   export let isLoading = false
   export let isApplying = false
   export let onClose: () => void
@@ -51,6 +52,19 @@
               <strong>{diffSummary.unchangedLines}</strong>
             </div>
           </div>
+
+          {#if affectedDomains.length > 0}
+            <div class="affected-box">
+              <strong>受影响域名</strong>
+              <div class="affected-list">
+                {#each affectedDomains as item}
+                  <span class={`affected-chip ${item.change}`}>
+                    {item.domain} · {item.change === 'added' ? '新增' : item.change === 'removed' ? '移除' : '更新'}
+                  </span>
+                {/each}
+              </div>
+            </div>
+          {/if}
 
           <div class="preview-grid">
             <section class="preview-pane">
@@ -177,6 +191,57 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
+  }
+
+  .affected-box {
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--sidebar-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .affected-box strong {
+    color: var(--text-primary);
+    font-size: 13px;
+  }
+
+  .affected-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .affected-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    background: var(--editor-bg);
+  }
+
+  .affected-chip.added {
+    color: #389e0d;
+    border-color: rgba(82, 196, 26, 0.28);
+    background: rgba(82, 196, 26, 0.08);
+  }
+
+  .affected-chip.removed {
+    color: #cf1322;
+    border-color: rgba(255, 77, 79, 0.28);
+    background: rgba(255, 77, 79, 0.08);
+  }
+
+  .affected-chip.updated {
+    color: #0958d9;
+    border-color: rgba(24, 144, 255, 0.28);
+    background: rgba(24, 144, 255, 0.08);
   }
 
   .preview-pane {

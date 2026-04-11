@@ -1,4 +1,11 @@
-import type { HostsConflictGroup, HostsContentStats, HostsDiffSummary, Scheme } from '$lib/types'
+import type {
+  HostsAffectedDomain,
+  HostsConflictGroup,
+  HostsContentStats,
+  HostsDiffLine,
+  HostsDiffSummary,
+  Scheme
+} from '$lib/types'
 
 type ParsedHostsEntry = {
   domain: string
@@ -99,6 +106,69 @@ export function summarizeHostsDiff(currentContent: string, nextContent: string):
   }
 }
 
+export function collectHostsDiffLines(currentContent: string, nextContent: string): HostsDiffLine[] {
+  const currentLines = currentContent ? currentContent.split('\n') : []
+  const nextLines = nextContent ? nextContent.split('\n') : []
+  const currentCounts = new Map<string, number>()
+  const nextCounts = new Map<string, number>()
+
+  for (const line of currentLines) {
+    currentCounts.set(line, (currentCounts.get(line) || 0) + 1)
+  }
+
+  for (const line of nextLines) {
+    nextCounts.set(line, (nextCounts.get(line) || 0) + 1)
+  }
+
+  const diffLines: HostsDiffLine[] = []
+
+  for (const line of currentLines) {
+    const remaining = nextCounts.get(line) || 0
+    if (remaining > 0) {
+      nextCounts.set(line, remaining - 1)
+    } else if (line.trim()) {
+      diffLines.push({ kind: 'removed', value: line })
+    }
+  }
+
+  for (const line of nextLines) {
+    const remaining = currentCounts.get(line) || 0
+    if (remaining > 0) {
+      currentCounts.set(line, remaining - 1)
+    } else if (line.trim()) {
+      diffLines.push({ kind: 'added', value: line })
+    }
+  }
+
+  return diffLines.slice(0, 120)
+}
+
+export function collectAffectedDomains(currentContent: string, nextContent: string): HostsAffectedDomain[] {
+  const currentMap = buildDomainMap(currentContent)
+  const nextMap = buildDomainMap(nextContent)
+  const domains = new Set<string>([...currentMap.keys(), ...nextMap.keys()])
+  const affectedDomains: HostsAffectedDomain[] = []
+
+  for (const domain of domains) {
+    const currentIps = currentMap.get(domain) || []
+    const nextIps = nextMap.get(domain) || []
+    const currentSignature = currentIps.join('|')
+    const nextSignature = nextIps.join('|')
+
+    if (!currentSignature && nextSignature) {
+      affectedDomains.push({ domain, change: 'added' })
+    } else if (currentSignature && !nextSignature) {
+      affectedDomains.push({ domain, change: 'removed' })
+    } else if (currentSignature !== nextSignature) {
+      affectedDomains.push({ domain, change: 'updated' })
+    }
+  }
+
+  return affectedDomains
+    .sort((left, right) => left.domain.localeCompare(right.domain))
+    .slice(0, 40)
+}
+
 export function detectHostsConflicts(schemes: Scheme[]): HostsConflictGroup[] {
   const entries = schemes.flatMap((scheme) => parseHostsEntries(scheme.content, scheme.name))
   const byDomain = new Map<string, Map<string, Set<string>>>()
@@ -132,4 +202,31 @@ export function detectHostsConflicts(schemes: Scheme[]): HostsConflictGroup[] {
         .sort((left, right) => left.ip.localeCompare(right.ip))
     }))
     .sort((left, right) => left.domain.localeCompare(right.domain))
+}
+
+function buildDomainMap(content: string) {
+  const domainMap = new Map<string, string[]>()
+
+  for (const rawLine of content.split('\n')) {
+    const contentPart = stripInlineComment(rawLine).trim()
+    if (!contentPart) continue
+
+    const tokens = contentPart.split(/\s+/).filter(Boolean)
+    if (tokens.length < 2) continue
+
+    const [ip, ...domains] = tokens
+    for (const domain of domains) {
+      const normalized = domain.toLowerCase()
+      if (!domainMap.has(normalized)) {
+        domainMap.set(normalized, [])
+      }
+      domainMap.get(normalized)!.push(ip)
+    }
+  }
+
+  for (const [domain, ips] of domainMap.entries()) {
+    domainMap.set(domain, ips.sort())
+  }
+
+  return domainMap
 }

@@ -98,10 +98,22 @@ export interface HostsDiffSummary {
   unchangedLines: number
 }
 
+export interface HostsDiffLine {
+  kind: 'added' | 'removed'
+  value: string
+}
+
+export interface HostsAffectedDomain {
+  domain: string
+  change: 'added' | 'removed' | 'updated'
+}
+
 export interface WriteResultSummary {
   title: string
   description: string
   diff: HostsDiffSummary
+  diffLines: HostsDiffLine[]
+  affectedDomains: HostsAffectedDomain[]
   timestamp: string
 }
 
