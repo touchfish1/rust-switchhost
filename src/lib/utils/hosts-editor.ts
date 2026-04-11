@@ -9,6 +9,15 @@ export interface HostsContentAnalysis {
   issues: HostsValidationIssue[]
 }
 
+export interface ManagedHostsBlockRange {
+  startLine: number
+  endLine: number
+  lineCount: number
+}
+
+export const MANAGED_BLOCK_START = '# >>> rust-switchhost managed start >>>'
+export const MANAGED_BLOCK_END = '# <<< rust-switchhost managed end <<<'
+
 export function isValidIP(ip: string): boolean {
   const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/
   const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/
@@ -81,5 +90,20 @@ export function analyzeHostsContent(content: string): HostsContentAnalysis {
     ruleCount,
     commentCount,
     issues
+  }
+}
+
+export function getManagedHostsBlockRange(content: string): ManagedHostsBlockRange | null {
+  const lines = content.split('\n')
+  const startIndex = lines.findIndex((line) => line.includes(MANAGED_BLOCK_START))
+  if (startIndex < 0) return null
+
+  const endIndex = lines.findIndex((line, index) => index >= startIndex && line.includes(MANAGED_BLOCK_END))
+  if (endIndex < 0) return null
+
+  return {
+    startLine: startIndex + 1,
+    endLine: endIndex + 1,
+    lineCount: endIndex - startIndex + 1
   }
 }

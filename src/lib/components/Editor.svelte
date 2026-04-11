@@ -5,7 +5,13 @@
   import { EditorView, lineNumbers, highlightActiveLine, highlightActiveLineGutter, Decoration, ViewPlugin, ViewUpdate, keymap } from '@codemirror/view'
   import { EditorState, Compartment, RangeSetBuilder, RangeSet, Prec } from '@codemirror/state'
   import { history } from '@codemirror/commands'
-  import { isValidHostname, isValidIP } from '$lib/utils/hosts-editor'
+  import type { HostsValidationIssue, ManagedHostsBlockRange } from '$lib/utils/hosts-editor'
+  import {
+    MANAGED_BLOCK_END,
+    MANAGED_BLOCK_START,
+    isValidHostname,
+    isValidIP
+  } from '$lib/utils/hosts-editor'
 
   type DecorationSet = RangeSet<Decoration>
 
@@ -14,7 +20,8 @@
     readOnly?: boolean
     summaryText?: string
     tips?: string[]
-    issues?: string[]
+    issues?: HostsValidationIssue[]
+    managedBlockRange?: ManagedHostsBlockRange | null
     onChange?: (detail: { content: string }) => void
   }
 
@@ -24,6 +31,7 @@
     summaryText = '',
     tips = [],
     issues = [],
+    managedBlockRange = null,
     onChange = () => {}
   }: EditorProps = $props()
 
@@ -39,6 +47,7 @@
   const domainDecoration = Decoration.mark({ class: 'cm-domain' })
   const invalidDomainDecoration = Decoration.mark({ class: 'cm-domain-invalid' })
   const commentDecoration = Decoration.mark({ class: 'cm-comment' })
+  const managedBlockDecoration = Decoration.line({ class: 'cm-managed-block-line' })
   
   function hostsHighlighter(view: EditorView): DecorationSet {
     const builder = new RangeSetBuilder<Decoration>()
@@ -46,7 +55,7 @@
     const lines = text.split('\n')
     let pos = 0
     
-    for (const line of lines) {
+    lines.forEach((line, lineIndex) => {
       const trimmed = line.trim()
       
       if (trimmed.startsWith('#')) {
@@ -90,9 +99,19 @@
           }
         }
       }
+
+      const lineNumber = lineIndex + 1
+      const isManagedBoundary = line.includes(MANAGED_BLOCK_START) || line.includes(MANAGED_BLOCK_END)
+      const isWithinManagedRange = managedBlockRange &&
+        lineNumber >= managedBlockRange.startLine &&
+        lineNumber <= managedBlockRange.endLine
+
+      if (isManagedBoundary || isWithinManagedRange) {
+        builder.add(pos, pos + line.length, managedBlockDecoration)
+      }
       
       pos += line.length + 1
-    }
+    })
     
     return builder.finish()
   }
@@ -166,6 +185,9 @@
       '.cm-comment': {
         color: 'var(--syntax-comment, #8c8c8c)',
         fontStyle: 'italic'
+      },
+      '.cm-managed-block-line': {
+        backgroundColor: 'rgba(24, 144, 255, 0.08)'
       }
     }, { dark: false })
   }
@@ -223,6 +245,9 @@
       '.cm-comment': {
         color: 'var(--syntax-comment, #6a9955)',
         fontStyle: 'italic'
+      },
+      '.cm-managed-block-line': {
+        backgroundColor: 'rgba(86, 156, 214, 0.12)'
       }
     }, { dark: true })
   }
@@ -371,6 +396,17 @@
       updateReadOnly(readOnly)
     }
   })
+
+  function jumpToLine(line: number) {
+    if (!view || line < 1) return
+    const targetLine = Math.min(line, view.state.doc.lines)
+    const lineInfo = view.state.doc.line(targetLine)
+    view.dispatch({
+      selection: { anchor: lineInfo.from },
+      effects: EditorView.scrollIntoView(lineInfo.from, { y: 'center' })
+    })
+    view.focus()
+  }
 </script>
 
 <div class="editor-shell">
@@ -389,7 +425,9 @@
       {#if issues.length > 0}
         <div class="editor-issues">
           {#each issues as issue}
-            <div class="editor-issue">{issue}</div>
+            <button class="editor-issue" type="button" onclick={() => jumpToLine(issue.line)}>
+              {issue.message}
+            </button>
           {/each}
         </div>
       {/if}
@@ -454,6 +492,15 @@
     font-size: 12px;
     color: var(--danger-color, #ff4d4f);
     line-height: 1.5;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .editor-issue:hover {
+    text-decoration: underline;
   }
 
   .editor-container {

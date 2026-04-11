@@ -23,6 +23,19 @@ export const builtinSchemeTemplates: SchemeTemplate[] = [
     ].join('\n')
   },
   {
+    id: 'example-group',
+    source: 'builtin',
+    name: '示例分组',
+    description: '一键体验完整流程，适合首次熟悉启用、预览和回滚操作。',
+    content: [
+      '# 示例分组',
+      '127.0.0.1 demo.local.test',
+      '127.0.0.1 api.demo.local.test',
+      '',
+      '# 你可以先启用体验，再按需替换为自己的域名'
+    ].join('\n')
+  },
+  {
     id: 'staging',
     source: 'builtin',
     name: '测试环境',

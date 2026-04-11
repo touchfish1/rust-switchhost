@@ -17,8 +17,8 @@
   import UpdateModal from './components/UpdateModal.svelte'
   import MergedHostsPreviewModal from './components/MergedHostsPreviewModal.svelte'
   import QuickStartGuideModal from './components/QuickStartGuideModal.svelte'
-  import Toast from './components/Toast.svelte'
-  import { getSchemeTemplateContent } from '$lib/data/templates'
+import Toast from './components/Toast.svelte'
+import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/templates'
   import {
     buildMergedHostsContent,
     detectHostsConflicts,
@@ -52,6 +52,7 @@
   import type {
     DnsLookupResult,
     HostsBackupEntry,
+    HostsValidationIssue,
     HostsConflictGroup,
     HostsContentStats,
     HostsDiffSummary,
@@ -130,7 +131,7 @@
   let deleteTargetScheme: Scheme | null = null
   let activeEditorRuleCount = 0
   let activeEditorCommentCount = 0
-  let activeEditorIssues: string[] = []
+  let activeEditorIssues: HostsValidationIssue[] = []
   const QUICK_START_STORAGE_KEY = 'quick-start-guide-dismissed-v1'
   const editorTips = [
     '格式：IP 域名1 域名2',
@@ -169,7 +170,7 @@
     const analysis = analyzeHostsContent($editorContentStore)
     activeEditorRuleCount = analysis.ruleCount
     activeEditorCommentCount = analysis.commentCount
-    activeEditorIssues = analysis.issues.slice(0, 3).map((issue) => issue.message)
+    activeEditorIssues = analysis.issues.slice(0, 3)
   }
 
   onMount(async () => {
@@ -646,6 +647,38 @@
     }
   }
 
+  function getSuggestedDemoSchemeName() {
+    const baseName = '示例分组'
+    const existingNames = new Set(get(schemesStore).map((scheme) => scheme.name.trim().toLowerCase()))
+    if (!existingNames.has(baseName.toLowerCase())) return baseName
+
+    let index = 2
+    while (existingNames.has(`${baseName} ${index}`.toLowerCase())) {
+      index += 1
+    }
+    return `${baseName} ${index}`
+  }
+
+  async function handleCreateExampleScheme() {
+    try {
+      loadingFlags.start('create')
+      appError.set(null)
+      const template = builtinSchemeTemplates.find((item) => item.id === 'example-group')
+      const created = await createSchemeRequest(
+        getSuggestedDemoSchemeName(),
+        template?.content || '# 示例分组\n127.0.0.1 demo.local.test\n'
+      )
+      upsertScheme(created)
+      selectScheme(created.id)
+      showToast('示例分组已创建，可以直接启用或先查看合并预览', 'success')
+    } catch (e) {
+      appError.set(`创建示例分组失败: ${e}`)
+      console.error('Failed to create example scheme:', e)
+    } finally {
+      loadingFlags.stop('create')
+    }
+  }
+
   function handleSaveCurrentSchemeAsTemplate() {
     const currentScheme = get(activeSchemeStore)
     if (!currentScheme) return
@@ -893,6 +926,24 @@
     return new Date(value).toLocaleString()
   }
 
+  function getSyncFailureSuggestion(message?: string | null) {
+    const normalized = (message || '').toLowerCase()
+    if (!normalized) return ''
+    if (normalized.includes('timeout') || normalized.includes('timed out')) {
+      return '建议检查网络连通性，或稍后重试同步。'
+    }
+    if (normalized.includes('dns') || normalized.includes('resolve') || normalized.includes('name or service not known')) {
+      return '建议检查远程地址是否可访问，或先确认当前 DNS/代理配置。'
+    }
+    if (normalized.includes('404') || normalized.includes('403') || normalized.includes('401')) {
+      return '建议确认远程 URL 是否正确、资源是否仍存在，以及访问权限是否正常。'
+    }
+    if (normalized.includes('ssl') || normalized.includes('certificate') || normalized.includes('tls')) {
+      return '建议检查证书有效性，必要时改用可信 HTTPS 源。'
+    }
+    return '建议先查看同步日志，再根据错误信息检查网络、地址和权限配置。'
+  }
+
   function getSyncOverviewTone(status?: string) {
     switch (status) {
       case 'success':
@@ -1029,6 +1080,11 @@
                   </span>
                 {/if}
               </div>
+              {#if $activeSchemeStore.sync_status === 'error' && $activeSchemeStore.last_sync_error}
+                <div class="sync-suggestion">
+                  建议处理：{getSyncFailureSuggestion($activeSchemeStore.last_sync_error)}
+                </div>
+              {/if}
               <div class="sync-overview-grid">
                 <div class={`sync-overview-card ${getSyncOverviewTone($activeSchemeStore.sync_status)}`}>
                   <span>同步状态</span>
@@ -1097,6 +1153,9 @@
             </button>
             <button class="btn-secondary" on:click={() => openCreateModal('remote')}>
               新建远程分组
+            </button>
+            <button class="btn-secondary" on:click={handleCreateExampleScheme}>
+              创建示例分组
             </button>
             <button class="btn-secondary" on:click={openQuickStartGuide}>
               查看使用引导
@@ -1643,6 +1702,17 @@
   .sync-next-retry {
     font-size: 12px;
     color: var(--text-secondary);
+  }
+
+  .sync-suggestion {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #ad6800;
+    line-height: 1.6;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(250, 173, 20, 0.12);
+    border: 1px solid rgba(250, 173, 20, 0.24);
   }
   
   .empty-state {

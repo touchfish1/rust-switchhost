@@ -1,9 +1,15 @@
 <script lang="ts">
   import Editor from './Editor.svelte'
+  import { getManagedHostsBlockRange } from '$lib/utils/hosts-editor'
 
   export let isOpen = false
   export let content = ''
   export let onClose: () => void
+
+  $: managedBlockRange = getManagedHostsBlockRange(content)
+  $: summaryText = managedBlockRange
+    ? `已检测到软件托管区块，共 ${managedBlockRange.lineCount} 行，下面已高亮显示。`
+    : '当前 Hosts 中还没有软件托管区块，说明尚未通过本软件写入规则。'
 </script>
 
 {#if isOpen}
@@ -26,7 +32,10 @@
       </div>
 
       <div class="hosts-modal-body">
-        <Editor content={content} readOnly={true} />
+        <div class="hosts-hint">
+          {summaryText}
+        </div>
+        <Editor content={content} readOnly={true} managedBlockRange={managedBlockRange} />
       </div>
     </div>
   </div>
@@ -97,5 +106,16 @@
   .hosts-modal-body {
     flex: 1;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .hosts-hint {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(24, 144, 255, 0.08);
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.6;
   }
 </style>
