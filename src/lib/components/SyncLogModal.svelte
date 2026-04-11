@@ -1,10 +1,27 @@
+<svelte:options runes={true} />
+
 <script lang="ts">
   import type { SyncLogEntry } from '$lib/types'
 
-  export let isOpen = false
-  export let schemeName = ''
-  export let logs: SyncLogEntry[] = []
-  export let onClose: (() => void) | undefined = undefined
+  type SyncLogModalProps = {
+    isOpen?: boolean
+    schemeName?: string
+    logs?: SyncLogEntry[]
+    onClose?: (() => void) | undefined
+  }
+
+  let {
+    isOpen = false,
+    schemeName = '',
+    logs = [],
+    onClose = undefined
+  }: SyncLogModalProps = $props()
+  let filter = $state<'all' | 'success' | 'error'>('all')
+  let copiedMessage = $state('')
+
+  const filteredLogs = $derived(
+    filter === 'all' ? logs : logs.filter((log) => log.status === filter)
+  )
 
   function closeModal() {
     onClose?.()
@@ -15,13 +32,28 @@
     if (trigger === 'manual') return '手动同步'
     return trigger
   }
+
+  async function copyLog(log: SyncLogEntry) {
+    const payload = [
+      `时间: ${new Date(log.timestamp).toLocaleString()}`,
+      `状态: ${log.status}`,
+      `触发: ${formatTrigger(log.trigger)}`,
+      `消息: ${log.message}`
+    ].join('\n')
+
+    await navigator.clipboard.writeText(payload)
+    copiedMessage = '已复制该条日志'
+    setTimeout(() => {
+      copiedMessage = ''
+    }, 1800)
+  }
 </script>
 
 {#if isOpen}
   <div
     class="modal-overlay"
-    on:click|self={closeModal}
-    on:keydown={(event) => event.key === 'Escape' && closeModal()}
+    onclick={(event) => event.target === event.currentTarget && closeModal()}
+    onkeydown={(event) => event.key === 'Escape' && closeModal()}
     role="dialog"
     aria-modal="true"
     aria-label="同步日志"
@@ -33,20 +65,34 @@
           <h3>同步日志</h3>
           <p>{schemeName}</p>
         </div>
-        <button class="close-btn" on:click={closeModal} aria-label="关闭">×</button>
+        <button class="close-btn" onclick={closeModal} aria-label="关闭">×</button>
       </div>
 
       <div class="modal-body">
-        {#if logs.length === 0}
+        <div class="toolbar">
+          <div class="filter-group">
+            <button class:selected={filter === 'all'} onclick={() => (filter = 'all')}>全部</button>
+            <button class:selected={filter === 'success'} onclick={() => (filter = 'success')}>成功</button>
+            <button class:selected={filter === 'error'} onclick={() => (filter = 'error')}>失败</button>
+          </div>
+          {#if copiedMessage}
+            <span class="copied-hint">{copiedMessage}</span>
+          {/if}
+        </div>
+
+        {#if filteredLogs.length === 0}
           <div class="empty-state">暂无同步日志</div>
         {:else}
-          {#each logs as log}
+          {#each filteredLogs as log}
             <div class="log-item">
               <div class="log-head">
                 <span class="log-time">{new Date(log.timestamp).toLocaleString()}</span>
-                <span class:status-success={log.status === 'success'} class:status-error={log.status === 'error'} class="log-status">
-                  {log.status === 'success' ? '成功' : '失败'}
-                </span>
+                <div class="log-head-actions">
+                  <span class:status-success={log.status === 'success'} class:status-error={log.status === 'error'} class="log-status">
+                    {log.status === 'success' ? '成功' : '失败'}
+                  </span>
+                  <button class="copy-btn" onclick={() => copyLog(log)}>复制</button>
+                </div>
               </div>
               <div class="log-trigger">{formatTrigger(log.trigger)}</div>
               <div class="log-message">{log.message}</div>
@@ -125,6 +171,41 @@
     gap: 12px;
   }
 
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .filter-group {
+    display: flex;
+    gap: 8px;
+  }
+
+  .filter-group button,
+  .copy-btn {
+    border: 1px solid var(--border-color, #e0e0e0);
+    background: transparent;
+    color: var(--text-primary, #213547);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .filter-group button.selected {
+    border-color: var(--primary-color, #1890ff);
+    color: var(--primary-color, #1890ff);
+    background: rgba(24, 144, 255, 0.08);
+  }
+
+  .copied-hint {
+    font-size: 12px;
+    color: #389e0d;
+  }
+
   .empty-state {
     padding: 40px 20px;
     text-align: center;
@@ -146,6 +227,12 @@
     justify-content: space-between;
     gap: 16px;
     align-items: center;
+  }
+
+  .log-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .log-time {

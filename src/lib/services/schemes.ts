@@ -50,3 +50,7 @@ export function syncRemoteScheme(id: string, trigger: 'manual' | 'scheduled' = '
 export function getSchemeSyncLogs(id: string) {
   return invoke<SyncLogEntry[]>('get_scheme_sync_logs', { id })
 }
+
+export function fetchRemoteHosts(url: string) {
+  return invoke<string>('fetch_remote_hosts', { url })
+}

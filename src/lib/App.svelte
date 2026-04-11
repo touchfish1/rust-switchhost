@@ -16,6 +16,7 @@
   import CurrentHostsModal from './components/CurrentHostsModal.svelte'
   import UpdateModal from './components/UpdateModal.svelte'
   import MergedHostsPreviewModal from './components/MergedHostsPreviewModal.svelte'
+  import RemoteSyncPreviewModal from './components/RemoteSyncPreviewModal.svelte'
   import QuickStartGuideModal from './components/QuickStartGuideModal.svelte'
 import Toast from './components/Toast.svelte'
 import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/templates'
@@ -44,6 +45,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     getSchemeSyncLogs,
     importSchemes as importSchemesRequest,
     setSchemeEnabled as setSchemeEnabledRequest,
+    fetchRemoteHosts as fetchRemoteHostsRequest,
     syncRemoteScheme,
     updateScheme as updateSchemeRequest,
     updateSchemeRemoteConfig as updateSchemeRemoteConfigRequest
@@ -57,7 +59,8 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     HostsContentStats,
     HostsDiffSummary,
     Scheme,
-    SyncLogEntry
+    SyncLogEntry,
+    WriteResultSummary
   } from '$lib/types'
   import { appError, appVersion, hostsPermissionInfo, loadingFlags } from '$lib/stores/app'
   import {
@@ -109,6 +112,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   let isRestoringBackup = false
   let sidebarWidth = 320
   let syncLogs: SyncLogEntry[] = []
+  let writeResultSummary: WriteResultSummary | null = null
   let backupEntries: HostsBackupEntry[] = []
   let selectedBackupPath = ''
   let selectedBackupContent = ''
@@ -132,6 +136,12 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   let activeEditorRuleCount = 0
   let activeEditorCommentCount = 0
   let activeEditorIssues: HostsValidationIssue[] = []
+  let showRemoteSyncPreviewModal = false
+  let isLoadingRemoteSyncPreview = false
+  let isApplyingRemoteSyncPreview = false
+  let remoteSyncPreviewScheme: Scheme | null = null
+  let remoteSyncPreviewContent = ''
+  let remoteSyncPreviewDiff: HostsDiffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
   const QUICK_START_STORAGE_KEY = 'quick-start-guide-dismissed-v1'
   const editorTips = [
     '格式：IP 域名1 域名2',
@@ -300,6 +310,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
         showToast(result.message, 'success')
       } else {
         appError.set(result.message)
+        await copyUpdateDiagnostic(result.message)
       }
     } catch (e) {
       appError.set(`刷新 DNS 缓存失败: ${e}`)
@@ -393,10 +404,18 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     try {
       loadingFlags.start('toggle')
       appError.set(null)
+      const beforeContent = await getHostsContent()
       const nextSchemes = await setSchemeEnabledRequest(id, enabled)
       const enabledSchemes = nextSchemes.filter((scheme) => scheme.enabled)
       const conflicts = detectHostsConflicts(enabledSchemes)
       setSchemes(nextSchemes, id)
+      const afterContent = await getHostsContent()
+      writeResultSummary = {
+        title: enabled ? '分组已启用并写入系统 Hosts' : '分组已停用并重新写入系统 Hosts',
+        description: enabled ? '下面是这次实际写入带来的变更摘要。' : '下面是停用后重新计算得到的变更摘要。',
+        diff: summarizeHostsDiff(beforeContent, afterContent),
+        timestamp: new Date().toISOString()
+      }
       showToast(enabled ? '分组已启用并生效' : '分组已停用并生效', 'success')
       if (enabled && conflicts.length > 0) {
         showToast(`检测到 ${conflicts.length} 个域名冲突，建议查看“合并预览”`, 'warning', 3200)
@@ -500,9 +519,11 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       updater.setProgress('安装完成，应用即将重启...', 100)
       await restartApp()
     } catch (e) {
-      appError.set(`安装更新失败: ${e}`)
+      const message = `安装更新失败: ${e}`
+      appError.set(message)
       console.error('Failed to install update:', e)
       updater.clearProgress()
+      await copyUpdateDiagnostic(message)
     } finally {
       updater.finishInstall()
     }
@@ -792,11 +813,21 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
         loadingFlags.start('sync')
         appError.set(null)
       }
+      const beforeContent = silent ? '' : await getHostsContent()
 
       const updated = await syncRemoteScheme(id, silent ? 'scheduled' : 'manual')
       applyUpdatedSchemeStore(updated)
 
       if (!silent) {
+        if (updated.enabled) {
+          const afterContent = await getHostsContent()
+          writeResultSummary = {
+            title: '远程分组已同步并写入系统 Hosts',
+            description: '下面是这次同步后实际写入带来的变更摘要。',
+            diff: summarizeHostsDiff(beforeContent, afterContent),
+            timestamp: new Date().toISOString()
+          }
+        }
         showToast('远程分组同步成功', 'success')
       }
     } catch (e) {
@@ -815,9 +846,38 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   }
 
   async function handleSyncActiveScheme() {
-    const currentActiveSchemeId = get(activeSchemeIdStore)
-    if (!currentActiveSchemeId) return
-    await syncSchemeById(currentActiveSchemeId, false)
+    const currentScheme = get(activeSchemeStore)
+    if (!currentScheme?.id || !currentScheme.remote_url) return
+
+    try {
+      isLoadingRemoteSyncPreview = true
+      appError.set(null)
+      remoteSyncPreviewScheme = currentScheme
+      remoteSyncPreviewContent = await fetchRemoteHostsRequest(currentScheme.remote_url)
+      remoteSyncPreviewDiff = summarizeHostsDiff(currentScheme.content, remoteSyncPreviewContent)
+      showRemoteSyncPreviewModal = true
+    } catch (e) {
+      appError.set(`拉取远程预览失败: ${e}`)
+      console.error('Failed to fetch remote preview:', e)
+    } finally {
+      isLoadingRemoteSyncPreview = false
+    }
+  }
+
+  async function confirmRemoteSyncPreview() {
+    if (!remoteSyncPreviewScheme) return
+
+    try {
+      isApplyingRemoteSyncPreview = true
+      showRemoteSyncPreviewModal = true
+      await syncSchemeById(remoteSyncPreviewScheme.id, false)
+    } finally {
+      isApplyingRemoteSyncPreview = false
+      showRemoteSyncPreviewModal = false
+      remoteSyncPreviewScheme = null
+      remoteSyncPreviewContent = ''
+      remoteSyncPreviewDiff = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
+    }
   }
 
   function openSyncLogModal() {
@@ -921,6 +981,22 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     }
   }
 
+  async function copyUpdateDiagnostic(message: string) {
+    const payload = [
+      `应用版本: ${get(appVersion) || 'unknown'}`,
+      `平台: ${navigator.platform || 'unknown'}`,
+      `时间: ${new Date().toLocaleString()}`,
+      `错误: ${message}`
+    ].join('\n')
+
+    try {
+      await navigator.clipboard.writeText(payload)
+      showToast('已复制诊断信息，可直接反馈给开发者', 'info')
+    } catch (error) {
+      console.error('Failed to copy diagnostic info:', error)
+    }
+  }
+
   function formatLastSync(value?: string | null) {
     if (!value) return '还没有同步记录'
     return new Date(value).toLocaleString()
@@ -1007,6 +1083,20 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
         <strong>Hosts 权限不足</strong>
         <span>{$hostsPermissionInfo.message}</span>
       </div>
+    </div>
+  {/if}
+
+  {#if writeResultSummary}
+    <div class="write-result-banner">
+      <div>
+        <strong>{writeResultSummary.title}</strong>
+        <span>{writeResultSummary.description}</span>
+        <small>
+          新增 {writeResultSummary.diff.addedLines} 行 · 移除 {writeResultSummary.diff.removedLines} 行 · 保留 {writeResultSummary.diff.unchangedLines} 行
+          · {new Date(writeResultSummary.timestamp).toLocaleTimeString()}
+        </small>
+      </div>
+      <button on:click={() => { writeResultSummary = null }}>×</button>
     </div>
   {/if}
   
@@ -1293,6 +1383,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       onClose={() => { updater.setShowUpdateModal(false) }}
       onOpenUrl={openUpdateUrl}
       onInstall={handleInstallUpdate}
+      onCopyDiagnostic={() => copyUpdateDiagnostic($appError || '请结合当前升级状态反馈问题')}
     />
   {/if}
 
@@ -1317,6 +1408,25 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     diffSummary={previewDiffSummary}
     conflicts={mergedPreviewConflicts}
     onClose={() => { showMergedPreviewModal = false }}
+  />
+
+  <RemoteSyncPreviewModal
+    isOpen={showRemoteSyncPreviewModal}
+    schemeName={remoteSyncPreviewScheme?.name || ''}
+    remoteUrl={remoteSyncPreviewScheme?.remote_url || ''}
+    currentContent={remoteSyncPreviewScheme?.content || ''}
+    remoteContent={remoteSyncPreviewContent}
+    diffSummary={remoteSyncPreviewDiff}
+    isLoading={isLoadingRemoteSyncPreview}
+    isApplying={isApplyingRemoteSyncPreview}
+    onClose={() => {
+      if (isApplyingRemoteSyncPreview) return
+      showRemoteSyncPreviewModal = false
+      remoteSyncPreviewScheme = null
+      remoteSyncPreviewContent = ''
+      remoteSyncPreviewDiff = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
+    }}
+    onConfirm={confirmRemoteSyncPreview}
   />
 
   <QuickStartGuideModal
@@ -1498,6 +1608,42 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     color: #ad6800;
     display: flex;
     align-items: center;
+  }
+
+  .write-result-banner {
+    padding: 12px 24px;
+    background: rgba(82, 196, 26, 0.1);
+    border-bottom: 1px solid rgba(82, 196, 26, 0.28);
+    color: #237804;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .write-result-banner div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .write-result-banner strong,
+  .write-result-banner span,
+  .write-result-banner small {
+    line-height: 1.5;
+  }
+
+  .write-result-banner span,
+  .write-result-banner small {
+    font-size: 13px;
+  }
+
+  .write-result-banner button {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: 20px;
+    cursor: pointer;
   }
 
   .permission-banner div {

@@ -98,4 +98,11 @@ export interface HostsDiffSummary {
   unchangedLines: number
 }
 
+export interface WriteResultSummary {
+  title: string
+  description: string
+  diff: HostsDiffSummary
+  timestamp: string
+}
+
 export type UpdaterHandle = Update | null

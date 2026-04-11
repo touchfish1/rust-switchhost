@@ -11,6 +11,7 @@
   export let onClose: () => void
   export let onOpenUrl: (url: string) => void | Promise<void>
   export let onInstall: () => void | Promise<void>
+  export let onCopyDiagnostic: () => void | Promise<void>
 </script>
 
 {#if isOpen}
@@ -76,6 +77,13 @@
               disabled={isInstallingUpdate}
             >
               查看发布页
+            </button>
+            <button
+              class="btn-secondary"
+              on:click={onCopyDiagnostic}
+              disabled={isInstallingUpdate}
+            >
+              复制诊断信息
             </button>
             <button class="btn-primary" on:click={onInstall} disabled={isInstallingUpdate}>
               {isInstallingUpdate
