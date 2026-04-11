@@ -146,6 +146,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   let remoteSyncPreviewDiff: HostsDiffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
   let remoteSyncPreviewAffectedDomains = []
   let showWriteResultDetails = false
+  let writeResultSearch = ''
   const QUICK_START_STORAGE_KEY = 'quick-start-guide-dismissed-v1'
   const editorTips = [
     '格式：IP 域名1 域名2',
@@ -422,6 +423,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
         affectedDomains: collectAffectedDomains(beforeContent, afterContent),
         timestamp: new Date().toISOString()
       }
+      writeResultSearch = ''
       showWriteResultDetails = false
       showToast(enabled ? '分组已启用并生效' : '分组已停用并生效', 'success')
       if (enabled && conflicts.length > 0) {
@@ -836,6 +838,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
             affectedDomains: collectAffectedDomains(beforeContent, afterContent),
             timestamp: new Date().toISOString()
           }
+          writeResultSearch = ''
           showWriteResultDetails = false
         }
         showToast('远程分组同步成功', 'success')
@@ -1044,6 +1047,12 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
         return 'neutral'
     }
   }
+
+  function matchesWriteResultSearch(value: string) {
+    const keyword = writeResultSearch.trim().toLowerCase()
+    if (!keyword) return true
+    return value.toLowerCase().includes(keyword)
+  }
 </script>
 
 <div class="app" class:dark={$theme}>
@@ -1108,8 +1117,14 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
           · {new Date(writeResultSummary.timestamp).toLocaleTimeString()}
         </small>
         {#if writeResultSummary.affectedDomains.length > 0}
+          <input
+            class="write-result-search"
+            type="text"
+            bind:value={writeResultSearch}
+            placeholder="按域名筛选这次写入结果"
+          />
           <div class="write-result-domains">
-            {#each writeResultSummary.affectedDomains as item}
+            {#each writeResultSummary.affectedDomains.filter((item) => matchesWriteResultSearch(item.domain)) as item}
               <span class={`write-domain-chip ${item.change}`}>
                 {item.domain} · {item.change === 'added' ? '新增' : item.change === 'removed' ? '移除' : '更新'}
               </span>
@@ -1121,7 +1136,10 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
         </button>
         {#if showWriteResultDetails && writeResultSummary.diffLines.length > 0}
           <pre class="write-result-diff">
-{writeResultSummary.diffLines.map((item) => `${item.kind === 'added' ? '+' : '-'} ${item.value}`).join('\n')}
+{writeResultSummary.diffLines
+  .filter((item) => matchesWriteResultSearch(item.value))
+  .map((item) => `${item.kind === 'added' ? '+' : '-'} ${item.value}`)
+  .join('\n')}
           </pre>
         {/if}
       </div>
@@ -1682,6 +1700,17 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 4px;
+  }
+
+  .write-result-search {
+    width: min(360px, 100%);
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(35, 120, 4, 0.18);
+    background: rgba(255, 255, 255, 0.75);
+    color: var(--text-primary);
+    font-size: 13px;
+    margin-top: 6px;
   }
 
   .write-domain-chip {

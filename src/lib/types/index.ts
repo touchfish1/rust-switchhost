@@ -106,6 +106,7 @@ export interface HostsDiffLine {
 export interface HostsAffectedDomain {
   domain: string
   change: 'added' | 'removed' | 'updated'
+  isConflict: boolean
 }
 
 export interface WriteResultSummary {

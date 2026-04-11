@@ -156,11 +156,11 @@ export function collectAffectedDomains(currentContent: string, nextContent: stri
     const nextSignature = nextIps.join('|')
 
     if (!currentSignature && nextSignature) {
-      affectedDomains.push({ domain, change: 'added' })
+      affectedDomains.push({ domain, change: 'added', isConflict: false })
     } else if (currentSignature && !nextSignature) {
-      affectedDomains.push({ domain, change: 'removed' })
+      affectedDomains.push({ domain, change: 'removed', isConflict: false })
     } else if (currentSignature !== nextSignature) {
-      affectedDomains.push({ domain, change: 'updated' })
+      affectedDomains.push({ domain, change: 'updated', isConflict: true })
     }
   }
 
