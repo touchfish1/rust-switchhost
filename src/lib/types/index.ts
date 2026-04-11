@@ -82,6 +82,8 @@ export interface HostsConflictMapping {
 export interface HostsConflictGroup {
   domain: string
   mappings: HostsConflictMapping[]
+  effectiveIp: string
+  winningSchemeName: string
 }
 
 export interface HostsContentStats {

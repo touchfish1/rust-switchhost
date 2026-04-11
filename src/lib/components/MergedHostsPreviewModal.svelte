@@ -88,15 +88,22 @@
         <div class="conflict-box">
           <div class="conflict-head">
             <strong>检测到域名冲突</strong>
-            <span>同一个域名在不同分组中指向了不同 IP，最终生效顺序会受合并顺序影响。</span>
+            <span>同一个域名在不同分组中指向了不同 IP。下面会直接标出当前合并顺序下的最终生效结果。</span>
           </div>
           <div class="conflict-list">
             {#each conflicts as conflict}
               <div class="conflict-item">
-                <strong>{conflict.domain}</strong>
+                <div class="conflict-domain-row">
+                  <strong>{conflict.domain}</strong>
+                  <span class="conflict-result">
+                    最终生效：{conflict.effectiveIp} · {conflict.winningSchemeName}
+                  </span>
+                </div>
                 <div class="conflict-mappings">
                   {#each conflict.mappings as mapping}
-                    <span>{mapping.ip} · {mapping.schemeNames.join(' / ')}</span>
+                    <span class:selected={mapping.ip === conflict.effectiveIp}>
+                      {mapping.ip} · {mapping.schemeNames.join(' / ')}
+                    </span>
                   {/each}
                 </div>
               </div>
@@ -341,9 +348,21 @@
     gap: 8px;
   }
 
+  .conflict-domain-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
   .conflict-item strong {
     color: var(--text-primary);
     font-size: 13px;
+  }
+
+  .conflict-result {
+    color: #cf1322;
+    font-size: 12px;
+    font-weight: 600;
   }
 
   .conflict-mappings {
@@ -356,6 +375,11 @@
     color: var(--text-secondary);
     font-size: 12px;
     word-break: break-word;
+  }
+
+  .conflict-mappings span.selected {
+    color: #cf1322;
+    font-weight: 600;
   }
 
   .preview-body {

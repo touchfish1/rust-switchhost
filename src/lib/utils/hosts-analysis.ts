@@ -102,6 +102,7 @@ export function summarizeHostsDiff(currentContent: string, nextContent: string):
 export function detectHostsConflicts(schemes: Scheme[]): HostsConflictGroup[] {
   const entries = schemes.flatMap((scheme) => parseHostsEntries(scheme.content, scheme.name))
   const byDomain = new Map<string, Map<string, Set<string>>>()
+  const lastAppliedEntryByDomain = new Map<string, ParsedHostsEntry>()
 
   for (const entry of entries) {
     if (!byDomain.has(entry.domain)) {
@@ -114,12 +115,15 @@ export function detectHostsConflicts(schemes: Scheme[]): HostsConflictGroup[] {
     }
 
     domainMappings.get(entry.ip)!.add(entry.schemeName)
+    lastAppliedEntryByDomain.set(entry.domain, entry)
   }
 
   return Array.from(byDomain.entries())
     .filter(([, mappings]) => mappings.size > 1)
     .map(([domain, mappings]) => ({
       domain,
+      effectiveIp: lastAppliedEntryByDomain.get(domain)?.ip || '',
+      winningSchemeName: lastAppliedEntryByDomain.get(domain)?.schemeName || '',
       mappings: Array.from(mappings.entries())
         .map(([ip, schemeNames]) => ({
           ip,
