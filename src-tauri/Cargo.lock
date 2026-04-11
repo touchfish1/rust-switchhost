@@ -3125,7 +3125,7 @@ dependencies = [
 
 [[package]]
 name = "rust-switchhost"
-version = "0.0.32"
+version = "0.0.33"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
