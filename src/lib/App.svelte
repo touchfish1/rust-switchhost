@@ -1170,6 +1170,19 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       <div>
         <strong>Hosts 权限不足</strong>
         <span>{$hostsPermissionInfo.message}</span>
+        {#if $hostsPermissionInfo.guidance_title}
+          <strong class="permission-guidance-title">{$hostsPermissionInfo.guidance_title}</strong>
+        {/if}
+        {#if $hostsPermissionInfo.guidance_steps.length > 0}
+          <ul class="permission-guidance-list">
+            {#each $hostsPermissionInfo.guidance_steps as step}
+              <li>{step}</li>
+            {/each}
+          </ul>
+        {/if}
+        {#if $hostsPermissionInfo.commands.length > 0}
+          <pre class="permission-command-block">{$hostsPermissionInfo.commands.join('\n')}</pre>
+        {/if}
       </div>
     </div>
   {/if}
@@ -1694,7 +1707,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   .permission-banner div {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
   }
 
   .permission-banner strong {
@@ -1703,12 +1716,40 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
 
   .permission-banner span {
     font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .permission-guidance-title {
+    margin-top: 4px;
+  }
+
+  .permission-guidance-list {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .permission-command-block {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.08);
+    color: inherit;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   .dark .permission-banner {
     background: #2b2615;
     border-bottom-color: #6b5b18;
     color: #ffd666;
+  }
+
+  .dark .permission-command-block {
+    background: rgba(255, 255, 255, 0.08);
   }
   
   .error-banner button {

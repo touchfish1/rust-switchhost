@@ -34,6 +34,9 @@ export interface HostsPermissionInfo {
   hosts_path: string
   platform: string
   message: string
+  guidance_title?: string | null
+  guidance_steps: string[]
+  commands: string[]
 }
 
 export interface DnsFlushResult {
