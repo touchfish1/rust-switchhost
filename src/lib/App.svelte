@@ -1080,6 +1080,7 @@
     mergedContent={previewMergedHostsContent}
     {previewScopeLabel}
     note={previewNote}
+    sourceSchemes={previewSourceSchemes}
     currentStats={previewCurrentStats}
     mergedStats={previewMergedStats}
     diffSummary={previewDiffSummary}

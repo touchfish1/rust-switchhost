@@ -1,17 +1,29 @@
 <script lang="ts">
   import Editor from './Editor.svelte'
-  import type { HostsConflictGroup, HostsContentStats, HostsDiffSummary } from '$lib/types'
+  import type { HostsConflictGroup, HostsContentStats, HostsDiffSummary, Scheme } from '$lib/types'
+  import { toasts } from '$lib/stores/toasts'
 
   export let isOpen = false
   export let currentContent = ''
   export let mergedContent = ''
   export let previewScopeLabel = ''
   export let note = ''
+  export let sourceSchemes: Scheme[] = []
   export let currentStats: HostsContentStats
   export let mergedStats: HostsContentStats
   export let diffSummary: HostsDiffSummary
   export let conflicts: HostsConflictGroup[] = []
   export let onClose: () => void
+
+  async function copyMergedContent() {
+    try {
+      await navigator.clipboard.writeText(mergedContent)
+      toasts.push('合并结果已复制到剪贴板', 'success')
+    } catch (error) {
+      console.error('Failed to copy merged hosts content:', error)
+      toasts.push('复制失败，请检查系统剪贴板权限', 'error')
+    }
+  }
 </script>
 
 {#if isOpen}
@@ -30,7 +42,12 @@
           <h3>合并预览</h3>
           <p>{previewScopeLabel || '查看即将写入系统 Hosts 的合并结果'}</p>
         </div>
-        <button class="preview-close" type="button" on:click={onClose} aria-label="关闭">×</button>
+        <div class="preview-header-actions">
+          <button class="preview-copy" type="button" on:click={copyMergedContent} disabled={!mergedContent}>
+            复制合并结果
+          </button>
+          <button class="preview-close" type="button" on:click={onClose} aria-label="关闭">×</button>
+        </div>
       </div>
 
       <div class="preview-summary">
@@ -54,6 +71,17 @@
 
       {#if note}
         <div class="preview-note">{note}</div>
+      {/if}
+
+      {#if sourceSchemes.length > 0}
+        <div class="source-box">
+          <strong>当前参与合并的分组</strong>
+          <div class="source-list">
+            {#each sourceSchemes as scheme}
+              <span class="source-chip">{scheme.name}</span>
+            {/each}
+          </div>
+        </div>
       {/if}
 
       {#if conflicts.length > 0}
@@ -146,6 +174,35 @@
     font-size: 13px;
   }
 
+  .preview-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .preview-copy {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--sidebar-bg);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .preview-copy:hover:not(:disabled) {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: var(--hover-bg);
+  }
+
+  .preview-copy:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
   .preview-close {
     width: 36px;
     height: 36px;
@@ -202,6 +259,41 @@
     background: var(--hover-bg);
     color: var(--text-secondary);
     font-size: 13px;
+  }
+
+  .source-box {
+    margin: 14px 22px 0;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--sidebar-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .source-box strong {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  .source-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .source-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: var(--editor-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
   }
 
   .conflict-box {
@@ -315,6 +407,17 @@
     .preview-body,
     .conflict-list {
       grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .preview-header {
+      flex-direction: column;
+    }
+
+    .preview-header-actions {
+      width: 100%;
+      justify-content: space-between;
     }
   }
 </style>
