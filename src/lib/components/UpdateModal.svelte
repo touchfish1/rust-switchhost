@@ -6,6 +6,7 @@
   export let availableUpdate: UpdaterHandle = null
   export let isInstallingUpdate = false
   export let updateProgressText = ''
+  export let updateProgressValue: number | null = null
   export let formatPublishedAt: (value: string) => string
   export let onClose: () => void
   export let onOpenUrl: (url: string) => void | Promise<void>
@@ -88,7 +89,19 @@
 
         {#if updateProgressText}
           <div class="update-progress">
-            {updateProgressText}
+            {#if updateProgressValue !== null}
+              <div class="update-progress-head">
+                <strong>下载进度</strong>
+                <span>{Math.round(updateProgressValue)}%</span>
+              </div>
+              <div class="update-progress-bar" aria-hidden="true">
+                <div
+                  class="update-progress-fill"
+                  style={`width: ${Math.max(0, Math.min(100, updateProgressValue))}%`}
+                ></div>
+              </div>
+            {/if}
+            <div class="update-progress-text">{updateProgressText}</div>
           </div>
         {/if}
       </div>
@@ -259,11 +272,49 @@
   }
 
   .update-progress {
-    padding: 12px 14px;
+    padding: 14px;
     border-radius: 10px;
     background: var(--hover-bg);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
     font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .update-progress-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .update-progress-head strong,
+  .update-progress-head span {
+    color: var(--text-primary);
+  }
+
+  .update-progress-head span {
+    font-weight: 700;
+  }
+
+  .update-progress-bar {
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(22, 119, 255, 0.12);
+    overflow: hidden;
+  }
+
+  .update-progress-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #1677ff 0%, #36cfc9 100%);
+    transition: width 0.2s ease;
+  }
+
+  .update-progress-text {
+    line-height: 1.6;
+    word-break: break-word;
   }
 </style>

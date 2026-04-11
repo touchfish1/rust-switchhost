@@ -6,6 +6,7 @@ interface UpdaterState {
   availableUpdate: UpdaterHandle
   isInstallingUpdate: boolean
   updateProgressText: string
+  updateProgressValue: number | null
   showUpdateModal: boolean
 }
 
@@ -14,6 +15,7 @@ const initialState: UpdaterState = {
   availableUpdate: null,
   isInstallingUpdate: false,
   updateProgressText: '',
+  updateProgressValue: null,
   showUpdateModal: false
 }
 
@@ -36,7 +38,8 @@ function createUpdaterStore() {
       update((state) => ({
         ...state,
         isInstallingUpdate: true,
-        updateProgressText: progressText
+        updateProgressText: progressText,
+        updateProgressValue: 0
       }))
     },
     finishInstall() {
@@ -45,16 +48,25 @@ function createUpdaterStore() {
         isInstallingUpdate: false
       }))
     },
-    setProgress(updateProgressText: string) {
-      update((state) => ({ ...state, updateProgressText }))
+    setProgress(updateProgressText: string, updateProgressValue: number | null = null) {
+      update((state) => ({
+        ...state,
+        updateProgressText,
+        updateProgressValue: updateProgressValue === null ? state.updateProgressValue : statefulClamp(updateProgressValue)
+      }))
     },
     clearProgress() {
-      update((state) => ({ ...state, updateProgressText: '' }))
+      update((state) => ({ ...state, updateProgressText: '', updateProgressValue: null }))
     },
     reset() {
       set(initialState)
     }
   }
+}
+
+function statefulClamp(value: number | null) {
+  if (value === null) return null
+  return Math.max(0, Math.min(100, value))
 }
 
 export const updater = createUpdaterStore()

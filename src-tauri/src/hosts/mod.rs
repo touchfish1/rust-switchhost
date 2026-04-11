@@ -53,6 +53,9 @@ pub fn can_write_hosts_file() -> io::Result<()> {
     OpenOptions::new().read(true).write(true).open(path).map(|_| ())
 }
 
+const MANAGED_BLOCK_START: &str = "# >>> rust-switchhost managed start >>>";
+const MANAGED_BLOCK_END: &str = "# <<< rust-switchhost managed end <<<";
+
 pub fn write_hosts_file(content: &str) -> io::Result<()> {
     let path = get_hosts_path();
 
@@ -88,6 +91,12 @@ pub fn write_hosts_file(content: &str) -> io::Result<()> {
             Err(error)
         }
     }
+}
+
+pub fn write_managed_hosts_file(content: &str) -> io::Result<()> {
+    let current_content = read_hosts_file()?;
+    let next_content = merge_managed_hosts_content(&current_content, content);
+    write_hosts_file(&next_content)
 }
 
 pub fn backup_hosts_file() -> io::Result<String> {
@@ -159,6 +168,52 @@ pub fn read_backup_file(path: &str) -> io::Result<String> {
 pub fn restore_backup_file(path: &str) -> io::Result<()> {
     let content = read_backup_file(path)?;
     write_hosts_file(&content)
+}
+
+fn merge_managed_hosts_content(current_content: &str, managed_content: &str) -> String {
+    let base_content = strip_managed_hosts_block(current_content).trim_end().to_string();
+    let managed_content = managed_content.trim();
+
+    if managed_content.is_empty() {
+        return finalize_hosts_content(base_content);
+    }
+
+    let managed_block = format!(
+        "{MANAGED_BLOCK_START}\n{managed_content}\n{MANAGED_BLOCK_END}"
+    );
+
+    if base_content.is_empty() {
+        return finalize_hosts_content(managed_block);
+    }
+
+    finalize_hosts_content(format!("{base_content}\n\n{managed_block}"))
+}
+
+fn strip_managed_hosts_block(content: &str) -> String {
+    if let Some(start_index) = content.find(MANAGED_BLOCK_START) {
+        if let Some(end_relative_index) = content[start_index..].find(MANAGED_BLOCK_END) {
+            let end_index = start_index + end_relative_index + MANAGED_BLOCK_END.len();
+            let before = content[..start_index].trim_end_matches('\n');
+            let after = content[end_index..].trim_start_matches('\n');
+
+            return match (before.is_empty(), after.is_empty()) {
+                (true, true) => String::new(),
+                (false, true) => before.to_string(),
+                (true, false) => after.to_string(),
+                (false, false) => format!("{before}\n\n{after}"),
+            };
+        }
+    }
+
+    content.to_string()
+}
+
+fn finalize_hosts_content(content: String) -> String {
+    if content.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", content.trim_end())
+    }
 }
 
 pub fn flush_dns_cache() -> io::Result<String> {
@@ -339,7 +394,10 @@ fn summarize_hosts_content(content: &str) -> HostsContentSummary {
 
 #[cfg(test)]
 mod tests {
-    use super::summarize_hosts_content;
+    use super::{
+        merge_managed_hosts_content, strip_managed_hosts_block, summarize_hosts_content,
+        MANAGED_BLOCK_END, MANAGED_BLOCK_START,
+    };
 
     #[test]
     fn summarizes_hosts_backup_content() {
@@ -350,5 +408,44 @@ mod tests {
         assert_eq!(summary.line_count, 5);
         assert_eq!(summary.host_entry_count, 2);
         assert_eq!(summary.comment_count, 2);
+    }
+
+    #[test]
+    fn appends_managed_hosts_block_without_touching_existing_content() {
+        let current = "127.0.0.1 localhost\n::1 localhost\n";
+        let managed = "# Group: A\n1.1.1.1 example.com";
+
+        let merged = merge_managed_hosts_content(current, managed);
+
+        assert!(merged.starts_with("127.0.0.1 localhost\n::1 localhost\n\n"));
+        assert!(merged.contains(MANAGED_BLOCK_START));
+        assert!(merged.contains(managed));
+        assert!(merged.contains(MANAGED_BLOCK_END));
+    }
+
+    #[test]
+    fn replaces_existing_managed_block_only() {
+        let current = format!(
+            "127.0.0.1 localhost\n\n{MANAGED_BLOCK_START}\n# Group: Old\n1.1.1.1 old.local\n{MANAGED_BLOCK_END}\n"
+        );
+        let managed = "# Group: New\n8.8.8.8 new.local";
+
+        let merged = merge_managed_hosts_content(&current, managed);
+
+        assert!(merged.contains("127.0.0.1 localhost"));
+        assert!(merged.contains("# Group: New\n8.8.8.8 new.local"));
+        assert!(!merged.contains("old.local"));
+    }
+
+    #[test]
+    fn removing_managed_hosts_block_keeps_original_hosts_content() {
+        let current = format!(
+            "127.0.0.1 localhost\n# custom keep\n\n{MANAGED_BLOCK_START}\n# Group: A\n1.1.1.1 example.com\n{MANAGED_BLOCK_END}\n"
+        );
+
+        let merged = merge_managed_hosts_content(&current, "");
+
+        assert_eq!(merged, "127.0.0.1 localhost\n# custom keep\n");
+        assert_eq!(strip_managed_hosts_block(&current), "127.0.0.1 localhost\n# custom keep");
     }
 }

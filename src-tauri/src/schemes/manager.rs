@@ -500,7 +500,7 @@ impl SchemeManager {
     fn apply_active_schemes_for_current_platform(&self) -> io::Result<()> {
         let active_ids = self.active_ids_for_platform(&Self::current_platform());
         if active_ids.is_empty() {
-            return hosts::write_hosts_file("");
+            return hosts::write_managed_hosts_file("");
         }
 
         let mut merged_contents = Vec::new();
@@ -518,7 +518,7 @@ impl SchemeManager {
         let merged = merged_contents.join("\n\n");
         validate_hosts_content(&merged)
             .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
-        hosts::write_hosts_file(&merged)
+        hosts::write_managed_hosts_file(&merged)
     }
 
     fn make_unique_scheme_name(&self, base_name: &str) -> String {
