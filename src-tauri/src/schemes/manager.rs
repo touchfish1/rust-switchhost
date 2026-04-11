@@ -152,11 +152,19 @@ impl SchemeManager {
 
     pub fn update_scheme(&mut self, id: &str, name: String, content: String) -> io::Result<Scheme> {
         let normalized_name = self.validate_scheme_name(&name, Some(id))?;
+        let is_enabled = self
+            .active_ids_for_platform(&Self::current_platform())
+            .iter()
+            .any(|active_id| active_id == id);
+
         if let Some(scheme) = self.config.schemes.iter_mut().find(|s| s.id == id) {
             scheme.name = normalized_name;
             scheme.content = content;
             scheme.updated_at = Utc::now();
             let updated = scheme.clone();
+            if is_enabled {
+                self.apply_active_schemes_for_current_platform()?;
+            }
             self.save_config()?;
             Ok(updated)
         } else {
@@ -705,7 +713,14 @@ mod tests {
     use super::{SchemeManager, MAX_BACKGROUND_SYNC_WAIT_SECS, MIN_BACKGROUND_SYNC_WAIT_SECS};
     use crate::schemes::{Scheme, SchemeConfig};
     use chrono::{Duration, Utc};
+    use std::fs;
     use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+
+    fn test_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn calculates_retry_delay_with_backoff() {
@@ -746,5 +761,45 @@ mod tests {
 
         let wait = manager.get_next_sync_wait_duration_from(Utc::now());
         assert_eq!(wait.as_secs(), MAX_BACKGROUND_SYNC_WAIT_SECS);
+    }
+
+    #[test]
+    fn updating_enabled_scheme_rewrites_managed_hosts_file() {
+        let _guard = test_env_lock().lock().expect("lock poisoned");
+        let temp_root = std::env::temp_dir().join(format!("rust-switchhost-test-{}", uuid::Uuid::new_v4()));
+        let hosts_path = temp_root.join("hosts");
+        let backup_dir = temp_root.join("backups");
+        let config_path = temp_root.join("schemes.json");
+        let sync_log_path = temp_root.join("sync-logs.json");
+        fs::create_dir_all(&backup_dir).expect("create backup dir");
+        fs::write(&hosts_path, "127.0.0.1 localhost\n").expect("seed hosts file");
+
+        std::env::set_var("RUST_SWITCHHOST_HOSTS_PATH", &hosts_path);
+        std::env::set_var("RUST_SWITCHHOST_BACKUP_DIR", &backup_dir);
+
+        let result = (|| -> std::io::Result<()> {
+            let mut manager = SchemeManager {
+                config: SchemeConfig::default(),
+                config_path,
+                sync_log_path,
+            };
+
+            let scheme = manager.create_scheme("Local".to_string(), "1.1.1.1 before.test".to_string())?;
+            manager.set_scheme_enabled(&scheme.id, true)?;
+            manager.update_scheme(&scheme.id, "Local".to_string(), "2.2.2.2 after.test".to_string())?;
+
+            let written = fs::read_to_string(&hosts_path)?;
+            assert!(written.contains("127.0.0.1 localhost"));
+            assert!(written.contains("# Group: Local"));
+            assert!(written.contains("2.2.2.2 after.test"));
+            assert!(!written.contains("1.1.1.1 before.test"));
+            Ok(())
+        })();
+
+        std::env::remove_var("RUST_SWITCHHOST_HOSTS_PATH");
+        std::env::remove_var("RUST_SWITCHHOST_BACKUP_DIR");
+        let _ = fs::remove_dir_all(&temp_root);
+
+        result.expect("enabled scheme update should rewrite hosts file");
     }
 }

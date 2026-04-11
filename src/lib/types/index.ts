@@ -109,15 +109,6 @@ export interface HostsAffectedDomain {
   isConflict: boolean
 }
 
-export interface WriteResultSummary {
-  title: string
-  description: string
-  diff: HostsDiffSummary
-  diffLines: HostsDiffLine[]
-  affectedDomains: HostsAffectedDomain[]
-  timestamp: string
-}
-
 export interface RemoteSyncPreviewState {
   diff: HostsDiffSummary
   diffLines: HostsDiffLine[]

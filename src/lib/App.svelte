@@ -63,8 +63,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     HostsDiffLine,
     HostsDiffSummary,
     Scheme,
-    SyncLogEntry,
-    WriteResultSummary
+    SyncLogEntry
   } from '$lib/types'
   import { appError, appVersion, hostsPermissionInfo, loadingFlags } from '$lib/stores/app'
   import {
@@ -116,7 +115,6 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   let isRestoringBackup = false
   let sidebarWidth = 320
   let syncLogs: SyncLogEntry[] = []
-  let writeResultSummary: WriteResultSummary | null = null
   let backupEntries: HostsBackupEntry[] = []
   let selectedBackupPath = ''
   let selectedBackupContent = ''
@@ -149,8 +147,6 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   let remoteSyncPreviewDiff: HostsDiffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
   let remoteSyncPreviewAffectedDomains: HostsAffectedDomain[] = []
   let remoteSyncPreviewDiffLines: HostsDiffLine[] = []
-  let showWriteResultDetails = false
-  let writeResultSearch = ''
   const QUICK_START_STORAGE_KEY = 'quick-start-guide-dismissed-v1'
   const editorTips = [
     '格式：IP 域名1 域名2',
@@ -429,22 +425,13 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     try {
       loadingFlags.start('toggle')
       appError.set(null)
-      const beforeContent = await getHostsContent()
       const nextSchemes = await setSchemeEnabledRequest(id, enabled)
       const enabledSchemes = nextSchemes.filter((scheme) => scheme.enabled)
       const conflicts = detectHostsConflicts(enabledSchemes)
       setSchemes(nextSchemes, id)
-      const afterContent = await getHostsContent()
-      writeResultSummary = {
-        title: enabled ? '分组已启用并写入系统 Hosts' : '分组已停用并重新写入系统 Hosts',
-        description: enabled ? '下面是这次实际写入带来的变更摘要。' : '下面是停用后重新计算得到的变更摘要。',
-        diff: summarizeHostsDiff(beforeContent, afterContent),
-        diffLines: collectHostsDiffLines(beforeContent, afterContent),
-        affectedDomains: collectAffectedDomains(beforeContent, afterContent),
-        timestamp: new Date().toISOString()
+      if (showCurrentHostsModal) {
+        currentHostsContent = await getHostsContent()
       }
-      writeResultSearch = ''
-      showWriteResultDetails = false
       showToast(enabled ? '分组已启用并生效' : '分组已停用并生效', 'success')
       if (enabled && conflicts.length > 0) {
         showToast(`检测到 ${conflicts.length} 个域名冲突，建议查看“合并预览”`, 'warning', 3200)
@@ -796,6 +783,9 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       try {
         const updated = await updateSchemeRequest(currentActiveSchemeId, currentActiveScheme?.name || '未命名', nextContent)
         applyUpdatedSchemeStore(updated)
+        if (updated.enabled && showCurrentHostsModal) {
+          currentHostsContent = await getHostsContent()
+        }
       } catch (e) {
         console.error('Failed to update scheme:', e)
       }
@@ -842,24 +832,12 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
         loadingFlags.start('sync')
         appError.set(null)
       }
-      const beforeContent = silent ? '' : await getHostsContent()
-
       const updated = await syncRemoteScheme(id, silent ? 'scheduled' : 'manual')
       applyUpdatedSchemeStore(updated)
 
       if (!silent) {
-        if (updated.enabled) {
-          const afterContent = await getHostsContent()
-          writeResultSummary = {
-            title: '远程分组已同步并写入系统 Hosts',
-            description: '下面是这次同步后实际写入带来的变更摘要。',
-            diff: summarizeHostsDiff(beforeContent, afterContent),
-            diffLines: collectHostsDiffLines(beforeContent, afterContent),
-            affectedDomains: collectAffectedDomains(beforeContent, afterContent),
-            timestamp: new Date().toISOString()
-          }
-          writeResultSearch = ''
-          showWriteResultDetails = false
+        if (updated.enabled && showCurrentHostsModal) {
+          currentHostsContent = await getHostsContent()
         }
         showToast('远程分组同步成功', 'success')
       }
@@ -1070,33 +1048,6 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     }
   }
 
-  function matchesWriteResultSearch(value: string) {
-    const keyword = writeResultSearch.trim().toLowerCase()
-    if (!keyword) return true
-    return value.toLowerCase().includes(keyword)
-  }
-
-  async function copyWriteResultDiff() {
-    if (!writeResultSummary) return
-
-    const content = writeResultSummary.diffLines
-      .filter((item) => matchesWriteResultSearch(item.value))
-      .map((item) => `${item.kind === 'added' ? '+' : '-'} ${item.value}`)
-      .join('\n')
-
-    if (!content) {
-      showToast('当前筛选条件下没有可复制的 diff 内容', 'warning')
-      return
-    }
-
-    try {
-      await navigator.clipboard.writeText(content)
-      showToast('写入 diff 已复制到剪贴板', 'success')
-    } catch (error) {
-      console.error('Failed to copy write result diff:', error)
-      showToast('复制 diff 失败，请检查系统剪贴板权限', 'error')
-    }
-  }
 </script>
 
 <div class="app" class:dark={$theme}>
@@ -1151,49 +1102,6 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     </div>
   {/if}
 
-  {#if writeResultSummary}
-    <div class="write-result-banner">
-      <div>
-        <strong>{writeResultSummary.title}</strong>
-        <span>{writeResultSummary.description}</span>
-        <small>
-          新增 {writeResultSummary.diff.addedLines} 行 · 移除 {writeResultSummary.diff.removedLines} 行 · 保留 {writeResultSummary.diff.unchangedLines} 行
-          · {new Date(writeResultSummary.timestamp).toLocaleTimeString()}
-        </small>
-        {#if writeResultSummary.affectedDomains.length > 0}
-          <input
-            class="write-result-search"
-            type="text"
-            bind:value={writeResultSearch}
-            placeholder="按域名筛选这次写入结果"
-          />
-          <div class="write-result-domains">
-            {#each writeResultSummary.affectedDomains.filter((item) => matchesWriteResultSearch(item.domain)) as item}
-              <span class={`write-domain-chip ${item.change}`}>
-                {item.domain} · {item.change === 'added' ? '新增' : item.change === 'removed' ? '移除' : '更新'}
-              </span>
-            {/each}
-          </div>
-        {/if}
-        <button class="write-result-toggle" on:click={copyWriteResultDiff}>
-          复制当前 diff
-        </button>
-        <button class="write-result-toggle" on:click={() => { showWriteResultDetails = !showWriteResultDetails }}>
-          {showWriteResultDetails ? '收起详细 diff' : '展开详细 diff'}
-        </button>
-        {#if showWriteResultDetails && writeResultSummary.diffLines.length > 0}
-          <pre class="write-result-diff">
-{writeResultSummary.diffLines
-  .filter((item) => matchesWriteResultSearch(item.value))
-  .map((item) => `${item.kind === 'added' ? '+' : '-'} ${item.value}`)
-  .join('\n')}
-          </pre>
-        {/if}
-      </div>
-      <button on:click={() => { writeResultSummary = null }}>×</button>
-    </div>
-  {/if}
-  
   <div class="main">
     <Sidebar
       schemes={$schemesStore}
@@ -1709,107 +1617,6 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     color: #ad6800;
     display: flex;
     align-items: center;
-  }
-
-  .write-result-banner {
-    padding: 12px 24px;
-    background: rgba(82, 196, 26, 0.1);
-    border-bottom: 1px solid rgba(82, 196, 26, 0.28);
-    color: #237804;
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: flex-start;
-  }
-
-  .write-result-banner div {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .write-result-banner strong,
-  .write-result-banner span,
-  .write-result-banner small {
-    line-height: 1.5;
-  }
-
-  .write-result-banner span,
-  .write-result-banner small {
-    font-size: 13px;
-  }
-
-  .write-result-banner button {
-    border: none;
-    background: transparent;
-    color: inherit;
-    font-size: 20px;
-    cursor: pointer;
-  }
-
-  .write-result-domains {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 4px;
-  }
-
-  .write-result-search {
-    width: min(360px, 100%);
-    padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid rgba(35, 120, 4, 0.18);
-    background: rgba(255, 255, 255, 0.75);
-    color: var(--text-primary);
-    font-size: 13px;
-    margin-top: 6px;
-  }
-
-  .write-domain-chip {
-    display: inline-flex;
-    align-items: center;
-    min-height: 24px;
-    padding: 0 10px;
-    border-radius: 999px;
-    font-size: 12px;
-    border: 1px solid rgba(35, 120, 4, 0.18);
-    background: rgba(255, 255, 255, 0.55);
-    color: #237804;
-  }
-
-  .write-domain-chip.removed {
-    color: #cf1322;
-    border-color: rgba(255, 77, 79, 0.24);
-    background: rgba(255, 77, 79, 0.08);
-  }
-
-  .write-domain-chip.updated {
-    color: #0958d9;
-    border-color: rgba(24, 144, 255, 0.24);
-    background: rgba(24, 144, 255, 0.08);
-  }
-
-  .write-result-toggle {
-    align-self: flex-start;
-    padding: 0;
-    font-size: 13px !important;
-    font-weight: 600;
-    text-decoration: underline;
-  }
-
-  .write-result-diff {
-    margin: 0;
-    padding: 12px 14px;
-    border-radius: 10px;
-    border: 1px solid rgba(35, 120, 4, 0.18);
-    background: rgba(255, 255, 255, 0.65);
-    color: #1f1f1f;
-    font-size: 12px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 220px;
-    overflow: auto;
   }
 
   .permission-banner div {

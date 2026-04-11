@@ -18,7 +18,14 @@ pub struct HostsBackupEntry {
     pub comment_count: u64,
 }
 
+const HOSTS_PATH_OVERRIDE_ENV: &str = "RUST_SWITCHHOST_HOSTS_PATH";
+const BACKUP_DIR_OVERRIDE_ENV: &str = "RUST_SWITCHHOST_BACKUP_DIR";
+
 pub fn get_hosts_path() -> PathBuf {
+    if let Some(override_path) = std::env::var_os(HOSTS_PATH_OVERRIDE_ENV) {
+        return PathBuf::from(override_path);
+    }
+
     #[cfg(target_os = "windows")]
     {
         PathBuf::from(r"C:\Windows\System32\drivers\etc\hosts")
@@ -31,6 +38,14 @@ pub fn get_hosts_path() -> PathBuf {
 }
 
 pub fn get_backup_dir() -> PathBuf {
+    if let Some(override_path) = std::env::var_os(BACKUP_DIR_OVERRIDE_ENV) {
+        let override_dir = PathBuf::from(override_path);
+        if !override_dir.exists() {
+            fs::create_dir_all(&override_dir).expect("Failed to create backup directory");
+        }
+        return override_dir;
+    }
+
     let config_dir = dirs::config_dir()
         .expect("Failed to get config directory")
         .join("rust-switchhost")
