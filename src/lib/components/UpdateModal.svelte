@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { UpdateInfo, UpdaterHandle } from '$lib/types'
+  import { toasts } from '$lib/stores/toasts'
 
   export let isOpen = false
   export let updateInfo: UpdateInfo
@@ -12,6 +13,30 @@
   export let onOpenUrl: (url: string) => void | Promise<void>
   export let onInstall: () => void | Promise<void>
   export let onCopyDiagnostic: () => void | Promise<void>
+
+  async function copyReleaseInfo() {
+    const payload = [
+      `当前版本: ${updateInfo.current_version}`,
+      `最新版本: ${updateInfo.latest_version}`,
+      `版本标题: ${updateInfo.release_name}`,
+      `发布时间: ${formatPublishedAt(updateInfo.published_at)}`,
+      `发布页: ${updateInfo.html_url}`,
+      updateInfo.download_url ? `推荐下载: ${updateInfo.download_url}` : '',
+      '',
+      '发布说明:',
+      updateInfo.body || '暂无发布说明'
+    ]
+      .filter(Boolean)
+      .join('\n')
+
+    try {
+      await navigator.clipboard.writeText(payload)
+      toasts.push('版本信息已复制到剪贴板', 'success')
+    } catch (error) {
+      console.error('Failed to copy release info:', error)
+      toasts.push('复制版本信息失败，请检查系统剪贴板权限', 'error')
+    }
+  }
 </script>
 
 {#if isOpen}
@@ -50,9 +75,14 @@
           </div>
           <div class="update-meta-row">
             <span>发布页</span>
-            <button class="link-btn" on:click={() => onOpenUrl(updateInfo.html_url)}>
-              打开 GitHub Release
-            </button>
+            <div class="meta-action-group">
+              <button class="link-btn" on:click={copyReleaseInfo}>
+                复制版本信息
+              </button>
+              <button class="link-btn" on:click={() => onOpenUrl(updateInfo.html_url)}>
+                打开 GitHub Release
+              </button>
+            </div>
           </div>
           {#if updateInfo.download_url}
             <div class="update-meta-row">
@@ -253,6 +283,14 @@
     text-decoration: underline;
   }
 
+  .meta-action-group {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
   .release-notes h4 {
     margin: 0 0 10px 0;
     color: var(--text-primary);
@@ -324,5 +362,17 @@
   .update-progress-text {
     line-height: 1.6;
     word-break: break-word;
+  }
+
+  @media (max-width: 640px) {
+    .update-meta-row,
+    .update-actions {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .meta-action-group {
+      justify-content: flex-start;
+    }
   }
 </style>

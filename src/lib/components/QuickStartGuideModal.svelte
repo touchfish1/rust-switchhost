@@ -1,6 +1,9 @@
 <script lang="ts">
   export let isOpen = false
   export let onClose: () => void
+  export let onCreateLocal: () => void | Promise<void> = () => {}
+  export let onCreateRemote: () => void | Promise<void> = () => {}
+  export let onCreateExample: () => void | Promise<void> = () => {}
 
   const steps = [
     {
@@ -56,6 +59,15 @@
         <div class="guide-tips">
           <span>提示：双击左侧分组名称可重命名，`Ctrl+N` 可快速新建。</span>
           <span>如果启用多个分组，越靠后的规则越可能成为最终生效结果。</span>
+        </div>
+
+        <div class="guide-actions-box">
+          <strong>可以直接从这里开始</strong>
+          <div class="guide-actions">
+            <button class="btn-secondary" on:click={onCreateLocal}>新建本地分组</button>
+            <button class="btn-secondary" on:click={onCreateRemote}>新建远程分组</button>
+            <button class="btn-secondary" on:click={onCreateExample}>创建示例分组</button>
+          </div>
         </div>
       </div>
 
@@ -172,6 +184,26 @@
     gap: 6px;
   }
 
+  .guide-actions-box {
+    padding: 16px;
+    border-radius: 14px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    background: var(--sidebar-bg, #f5f5f5);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .guide-actions-box strong {
+    color: var(--text-primary, #213547);
+  }
+
+  .guide-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
   .close-btn {
     width: 36px;
     height: 36px;
@@ -203,9 +235,29 @@
     background: var(--primary-hover, #40a9ff);
   }
 
+  .btn-secondary {
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    background: var(--editor-bg, #ffffff);
+    color: var(--text-primary, #213547);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-secondary:hover {
+    border-color: var(--primary-color, #1890ff);
+    color: var(--primary-color, #1890ff);
+  }
+
   @media (max-width: 820px) {
     .guide-steps {
       grid-template-columns: 1fr;
+    }
+
+    .guide-actions {
+      flex-direction: column;
     }
   }
 </style>

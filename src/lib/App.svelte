@@ -344,6 +344,21 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     localStorage.setItem(QUICK_START_STORAGE_KEY, '1')
   }
 
+  function handleQuickStartCreateLocal() {
+    closeQuickStartGuide()
+    openCreateModal('local')
+  }
+
+  function handleQuickStartCreateRemote() {
+    closeQuickStartGuide()
+    openCreateModal('remote')
+  }
+
+  async function handleQuickStartCreateExample() {
+    closeQuickStartGuide()
+    await handleCreateExampleScheme()
+  }
+
   async function handleResolveDomain() {
     try {
       isResolvingDns = true
@@ -1515,6 +1530,9 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   <QuickStartGuideModal
     isOpen={showQuickStartGuide}
     onClose={closeQuickStartGuide}
+    onCreateLocal={handleQuickStartCreateLocal}
+    onCreateRemote={handleQuickStartCreateRemote}
+    onCreateExample={handleQuickStartCreateExample}
   />
 
   <Toast />
