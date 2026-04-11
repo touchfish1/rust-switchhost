@@ -120,6 +120,7 @@
   let previewDiffSummary: HostsDiffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
   let mergedPreviewConflicts: HostsConflictGroup[] = []
   let activeSchemeConflicts: HostsConflictGroup[] = []
+  let deleteTargetScheme: Scheme | null = null
 
   $: schemesForAnalysis = $schemesStore.map((scheme) =>
     scheme.id === $activeSchemeIdStore ? { ...scheme, content: $editorContentStore } : scheme
@@ -147,6 +148,7 @@
   $: previewCurrentStats = summarizeHostsContent(mergedPreviewCurrentContent)
   $: previewMergedStats = summarizeHostsContent(previewMergedHostsContent)
   $: previewDiffSummary = summarizeHostsDiff(mergedPreviewCurrentContent, previewMergedHostsContent)
+  $: deleteTargetScheme = $schemesStore.find((scheme) => scheme.id === deleteTargetId) || null
 
   onMount(async () => {
     const savedSidebarWidth = localStorage.getItem('sidebar-width')
@@ -651,8 +653,13 @@
       loadingFlags.start('toggle')
       appError.set(null)
       const nextSchemes = await setSchemeEnabledRequest(id, enabled)
+      const enabledSchemes = nextSchemes.filter((scheme) => scheme.enabled)
+      const conflicts = detectHostsConflicts(enabledSchemes)
       setSchemes(nextSchemes, id)
       showToast(enabled ? '分组已启用并生效' : '分组已停用并生效', 'success')
+      if (enabled && conflicts.length > 0) {
+        showToast(`检测到 ${conflicts.length} 个域名冲突，建议查看“合并预览”`, 'warning', 3200)
+      }
     } catch (e) {
       appError.set(`${enabled ? '启用' : '禁用'}分组失败: ${e}`)
       console.error('Failed to toggle scheme:', e)
@@ -1001,7 +1008,17 @@
       onCancel={() => { showDeleteModal = false; deleteTargetId = null }}
       onClose={() => { showDeleteModal = false; deleteTargetId = null }}
     >
-      <p class="confirm-text">确定要删除分组「{$schemesStore.find((scheme) => scheme.id === deleteTargetId)?.name || ''}」吗？</p>
+      <p class="confirm-text">确定要删除分组「{deleteTargetScheme?.name || ''}」吗？</p>
+      {#if deleteTargetScheme}
+        <p class="confirm-meta">
+          类型：{deleteTargetScheme.remote_url ? '远程分组' : '本地分组'} · 状态：{deleteTargetScheme.enabled ? '已启用' : '未启用'}
+        </p>
+        {#if deleteTargetScheme.enabled}
+          <p class="confirm-meta">
+            删除后会立即重新计算剩余启用分组，并把新的合并结果写入系统 Hosts。
+          </p>
+        {/if}
+      {/if}
       <p class="confirm-warning">此操作不可撤销。</p>
     </Modal>
   {/if}
@@ -1469,6 +1486,13 @@
     margin: 0 0 8px 0;
     font-size: 15px;
     color: var(--text-primary, #213547);
+  }
+
+  .confirm-meta {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
   }
   
   .confirm-warning {
