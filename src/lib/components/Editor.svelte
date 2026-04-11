@@ -5,18 +5,25 @@
   import { EditorView, lineNumbers, highlightActiveLine, highlightActiveLineGutter, Decoration, ViewPlugin, ViewUpdate, keymap } from '@codemirror/view'
   import { EditorState, Compartment, RangeSetBuilder, RangeSet, Prec } from '@codemirror/state'
   import { history } from '@codemirror/commands'
+  import { isValidHostname, isValidIP } from '$lib/utils/hosts-editor'
 
   type DecorationSet = RangeSet<Decoration>
 
   type EditorProps = {
     content?: string
     readOnly?: boolean
+    summaryText?: string
+    tips?: string[]
+    issues?: string[]
     onChange?: (detail: { content: string }) => void
   }
 
   let {
     content = '',
     readOnly = false,
+    summaryText = '',
+    tips = [],
+    issues = [],
     onChange = () => {}
   }: EditorProps = $props()
 
@@ -32,32 +39,6 @@
   const domainDecoration = Decoration.mark({ class: 'cm-domain' })
   const invalidDomainDecoration = Decoration.mark({ class: 'cm-domain-invalid' })
   const commentDecoration = Decoration.mark({ class: 'cm-comment' })
-  
-  function isValidIP(ip: string): boolean {
-    const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/
-    const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/
-    
-    if (ipv4Regex.test(ip)) {
-      const parts = ip.split('.')
-      return parts.every(part => {
-        const num = parseInt(part)
-        return num >= 0 && num <= 255
-      })
-    }
-    
-    return ipv6Regex.test(ip) || ip === '::1'
-  }
-
-  function isValidHostname(hostname: string): boolean {
-    if (!hostname || hostname.length > 253) return false
-    if (hostname === 'localhost') return true
-
-    const labels = hostname.split('.')
-    return labels.every((label) => {
-      if (!label || label.length > 63) return false
-      return /^[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?$/.test(label)
-    })
-  }
   
   function hostsHighlighter(view: EditorView): DecorationSet {
     const builder = new RangeSetBuilder<Decoration>()
@@ -392,13 +373,89 @@
   })
 </script>
 
-<div class="editor-container" bind:this={editorContainer}>
-  <div class="font-size-hint">
-    Ctrl + +/- 调节字号 | 当前: {fontSize}px
+<div class="editor-shell">
+  {#if !readOnly && (summaryText || tips.length > 0 || issues.length > 0)}
+    <div class="editor-guidance">
+      {#if summaryText}
+        <div class="editor-guidance-summary">{summaryText}</div>
+      {/if}
+      {#if tips.length > 0}
+        <div class="editor-guidance-row">
+          {#each tips as tip}
+            <span class="guidance-chip">{tip}</span>
+          {/each}
+        </div>
+      {/if}
+      {#if issues.length > 0}
+        <div class="editor-issues">
+          {#each issues as issue}
+            <div class="editor-issue">{issue}</div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <div class="editor-container" bind:this={editorContainer}>
+    <div class="font-size-hint">
+      Ctrl + +/- 调节字号 | 当前: {fontSize}px
+    </div>
   </div>
 </div>
 
 <style>
+  .editor-shell {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .editor-guidance {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    background: color-mix(in srgb, var(--sidebar-bg, #f5f5f5) 72%, var(--editor-bg, #ffffff) 28%);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .editor-guidance-summary {
+    font-size: 13px;
+    color: var(--text-primary, #213547);
+    font-weight: 600;
+  }
+
+  .editor-guidance-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .guidance-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    background: var(--editor-bg, #ffffff);
+    color: var(--text-secondary, #8c8c8c);
+    font-size: 12px;
+  }
+
+  .editor-issues {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .editor-issue {
+    font-size: 12px;
+    color: var(--danger-color, #ff4d4f);
+    line-height: 1.5;
+  }
+
   .editor-container {
     flex: 1;
     height: 100%;

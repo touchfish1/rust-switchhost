@@ -16,6 +16,7 @@
   import CurrentHostsModal from './components/CurrentHostsModal.svelte'
   import UpdateModal from './components/UpdateModal.svelte'
   import MergedHostsPreviewModal from './components/MergedHostsPreviewModal.svelte'
+  import QuickStartGuideModal from './components/QuickStartGuideModal.svelte'
   import Toast from './components/Toast.svelte'
   import { getSchemeTemplateContent } from '$lib/data/templates'
   import {
@@ -24,6 +25,7 @@
     summarizeHostsContent,
     summarizeHostsDiff
   } from '$lib/utils/hosts-analysis'
+  import { analyzeHostsContent } from '$lib/utils/hosts-editor'
   import { getAppVersion, restartApp } from '$lib/services/app'
   import {
     checkHostsPermission as fetchHostsPermission,
@@ -81,10 +83,15 @@
   let showDnsDiagnosticModal = false
   let showSyncLogModal = false
   let showMergedPreviewModal = false
+  let showQuickStartGuide = false
+  let showRestoreBackupConfirm = false
+  let showEmptySchemeConfirm = false
   let createModalMode: 'create' | 'edit-remote' = 'create'
   let createModalInitialType: 'local' | 'remote' = 'local'
   let remoteEditTarget: Scheme | null = null
   let deleteTargetId: string | null = null
+  let pendingRestoreBackupPath = ''
+  let pendingEnableSchemeId: string | null = null
   let currentHostsContent = ''
   let mergedPreviewCurrentContent = ''
   let isFlushingDns = false
@@ -121,6 +128,15 @@
   let mergedPreviewConflicts: HostsConflictGroup[] = []
   let activeSchemeConflicts: HostsConflictGroup[] = []
   let deleteTargetScheme: Scheme | null = null
+  let activeEditorRuleCount = 0
+  let activeEditorCommentCount = 0
+  let activeEditorIssues: string[] = []
+  const QUICK_START_STORAGE_KEY = 'quick-start-guide-dismissed-v1'
+  const editorTips = [
+    '格式：IP 域名1 域名2',
+    '注释请以 # 开头',
+    '启用后只会写入软件托管区块'
+  ]
 
   $: schemesForAnalysis = $schemesStore.map((scheme) =>
     scheme.id === $activeSchemeIdStore ? { ...scheme, content: $editorContentStore } : scheme
@@ -149,6 +165,12 @@
   $: previewMergedStats = summarizeHostsContent(previewMergedHostsContent)
   $: previewDiffSummary = summarizeHostsDiff(mergedPreviewCurrentContent, previewMergedHostsContent)
   $: deleteTargetScheme = $schemesStore.find((scheme) => scheme.id === deleteTargetId) || null
+  $: {
+    const analysis = analyzeHostsContent($editorContentStore)
+    activeEditorRuleCount = analysis.ruleCount
+    activeEditorCommentCount = analysis.commentCount
+    activeEditorIssues = analysis.issues.slice(0, 3).map((issue) => issue.message)
+  }
 
   onMount(async () => {
     const savedSidebarWidth = localStorage.getItem('sidebar-width')
@@ -163,6 +185,10 @@
         loadSchemes(),
         checkHostsPermission()
       ])
+
+      if (localStorage.getItem(QUICK_START_STORAGE_KEY) !== '1') {
+        showQuickStartGuide = true
+      }
 
       await checkForUpdatesSilently()
       updateCheckTimer = setInterval(() => {
@@ -287,6 +313,15 @@
     dnsLookupResult = null
   }
 
+  function openQuickStartGuide() {
+    showQuickStartGuide = true
+  }
+
+  function closeQuickStartGuide() {
+    showQuickStartGuide = false
+    localStorage.setItem(QUICK_START_STORAGE_KEY, '1')
+  }
+
   async function handleResolveDomain() {
     try {
       isResolvingDns = true
@@ -316,7 +351,14 @@
     }
   }
 
-  async function handleRestoreBackup(path: string) {
+  function handleRestoreBackup(path: string) {
+    if (!path) return
+    pendingRestoreBackupPath = path
+    showRestoreBackupConfirm = true
+  }
+
+  async function confirmRestoreBackup() {
+    const path = pendingRestoreBackupPath
     if (!path) return
 
     try {
@@ -337,6 +379,32 @@
       console.error('Failed to restore hosts backup:', e)
     } finally {
       isRestoringBackup = false
+      showRestoreBackupConfirm = false
+      pendingRestoreBackupPath = ''
+    }
+  }
+
+  function hasEffectiveHostsRules(content: string) {
+    return analyzeHostsContent(content).ruleCount > 0
+  }
+
+  async function performToggleScheme(id: string, enabled: boolean) {
+    try {
+      loadingFlags.start('toggle')
+      appError.set(null)
+      const nextSchemes = await setSchemeEnabledRequest(id, enabled)
+      const enabledSchemes = nextSchemes.filter((scheme) => scheme.enabled)
+      const conflicts = detectHostsConflicts(enabledSchemes)
+      setSchemes(nextSchemes, id)
+      showToast(enabled ? '分组已启用并生效' : '分组已停用并生效', 'success')
+      if (enabled && conflicts.length > 0) {
+        showToast(`检测到 ${conflicts.length} 个域名冲突，建议查看“合并预览”`, 'warning', 3200)
+      }
+    } catch (e) {
+      appError.set(`${enabled ? '启用' : '禁用'}分组失败: ${e}`)
+      console.error('Failed to toggle scheme:', e)
+    } finally {
+      loadingFlags.stop('toggle')
     }
   }
 
@@ -667,23 +735,16 @@
   async function handleToggleScheme(detail: { id: string; enabled: boolean }) {
     const { id, enabled } = detail
 
-    try {
-      loadingFlags.start('toggle')
-      appError.set(null)
-      const nextSchemes = await setSchemeEnabledRequest(id, enabled)
-      const enabledSchemes = nextSchemes.filter((scheme) => scheme.enabled)
-      const conflicts = detectHostsConflicts(enabledSchemes)
-      setSchemes(nextSchemes, id)
-      showToast(enabled ? '分组已启用并生效' : '分组已停用并生效', 'success')
-      if (enabled && conflicts.length > 0) {
-        showToast(`检测到 ${conflicts.length} 个域名冲突，建议查看“合并预览”`, 'warning', 3200)
+    if (enabled) {
+      const targetScheme = schemesForAnalysis.find((scheme) => scheme.id === id)
+      if (targetScheme && !hasEffectiveHostsRules(targetScheme.content)) {
+        pendingEnableSchemeId = id
+        showEmptySchemeConfirm = true
+        return
       }
-    } catch (e) {
-      appError.set(`${enabled ? '启用' : '禁用'}分组失败: ${e}`)
-      console.error('Failed to toggle scheme:', e)
-    } finally {
-      loadingFlags.stop('toggle')
     }
+
+    await performToggleScheme(id, enabled)
   }
 
   async function syncSchemeById(id: string, silent = false) {
@@ -799,8 +860,12 @@
     }
   }
 
-  function showToast(message: string, kind: 'success' | 'error' | 'warning' | 'info' = 'info') {
-    toasts.push(message, kind)
+  function showToast(
+    message: string,
+    kind: 'success' | 'error' | 'warning' | 'info' = 'info',
+    duration?: number
+  ) {
+    toasts.push(message, kind, duration)
   }
 
   function handleSidebarResize(detail: { width: number }) {
@@ -820,6 +885,24 @@
         return '待同步'
     }
   }
+
+  function formatLastSync(value?: string | null) {
+    if (!value) return '还没有同步记录'
+    return new Date(value).toLocaleString()
+  }
+
+  function getSyncOverviewTone(status?: string) {
+    switch (status) {
+      case 'success':
+        return 'success'
+      case 'error':
+        return 'warning'
+      case 'syncing':
+        return 'info'
+      default:
+        return 'neutral'
+    }
+  }
 </script>
 
 <div class="app" class:dark={$theme}>
@@ -831,6 +914,9 @@
       {/if}
     </div>
     <div class="header-actions">
+      <button class="btn-secondary" on:click={openQuickStartGuide}>
+        使用引导
+      </button>
       <button
         class="btn-secondary update-trigger"
         class:has-notification={$hasPendingUpdate}
@@ -941,6 +1027,28 @@
                   </span>
                 {/if}
               </div>
+              <div class="sync-overview-grid">
+                <div class={`sync-overview-card ${getSyncOverviewTone($activeSchemeStore.sync_status)}`}>
+                  <span>同步状态</span>
+                  <strong>{formatSyncStatus($activeSchemeStore.sync_status)}</strong>
+                </div>
+                <div class="sync-overview-card neutral">
+                  <span>上次同步</span>
+                  <strong>{formatLastSync($activeSchemeStore.last_synced_at)}</strong>
+                </div>
+                <div class={`sync-overview-card ${($activeSchemeStore.consecutive_failures || 0) > 0 ? 'warning' : 'success'}`}>
+                  <span>连续失败</span>
+                  <strong>{($activeSchemeStore.consecutive_failures || 0) > 0 ? `${$activeSchemeStore.consecutive_failures} 次` : '0 次'}</strong>
+                </div>
+                <div class="sync-overview-card neutral">
+                  <span>同步方式</span>
+                  <strong>
+                    {$activeSchemeStore.auto_sync_enabled && $activeSchemeStore.sync_interval_minutes
+                      ? `自动 · ${$activeSchemeStore.sync_interval_minutes} 分钟`
+                      : '手动触发'}
+                  </strong>
+                </div>
+              </div>
             {/if}
           </div>
           <div class="editor-actions">
@@ -972,6 +1080,9 @@
         
         <Editor
           content={$editorContentStore}
+          summaryText={`当前分组包含 ${activeEditorRuleCount} 条规则，${activeEditorCommentCount} 条注释${activeEditorIssues.length > 0 ? `，待修正 ${activeEditorIssues.length} 处提示` : ''}`}
+          tips={editorTips}
+          issues={activeEditorIssues}
           onChange={handleContentChange}
         />
       {:else}
@@ -984,6 +1095,9 @@
             </button>
             <button class="btn-secondary" on:click={() => openCreateModal('remote')}>
               新建远程分组
+            </button>
+            <button class="btn-secondary" on:click={openQuickStartGuide}>
+              查看使用引导
             </button>
           </div>
           <span class="empty-hint">本地分组适合手动维护，远程分组适合团队共享与定时同步。</span>
@@ -1014,6 +1128,43 @@
         createModalInitialType = 'local'
       }}
     />
+  {/if}
+
+  {#if showRestoreBackupConfirm}
+    <Modal
+      title="恢复备份版本"
+      confirmText="恢复并覆盖当前托管区块"
+      cancelText="取消"
+      type="danger"
+      onConfirm={confirmRestoreBackup}
+      onCancel={() => { showRestoreBackupConfirm = false; pendingRestoreBackupPath = '' }}
+      onClose={() => { showRestoreBackupConfirm = false; pendingRestoreBackupPath = '' }}
+    >
+      <p class="confirm-text">确定要恢复当前选中的 Hosts 备份吗？</p>
+      <p class="confirm-meta">恢复后会立即写入系统 Hosts，并以备份内容替换当前软件托管区块状态。</p>
+      <p class="confirm-warning">建议先确认备份预览内容与时间点，再执行恢复。</p>
+    </Modal>
+  {/if}
+
+  {#if showEmptySchemeConfirm}
+    <Modal
+      title="启用空规则分组"
+      confirmText="仍然启用"
+      cancelText="返回检查"
+      type="danger"
+      onConfirm={() => {
+        const id = pendingEnableSchemeId
+        showEmptySchemeConfirm = false
+        pendingEnableSchemeId = null
+        if (id) void performToggleScheme(id, true)
+      }}
+      onCancel={() => { showEmptySchemeConfirm = false; pendingEnableSchemeId = null }}
+      onClose={() => { showEmptySchemeConfirm = false; pendingEnableSchemeId = null }}
+    >
+      <p class="confirm-text">这个分组还没有有效的 Hosts 规则，启用后通常不会带来实际映射变化。</p>
+      <p class="confirm-meta">如果你只是想先占位或稍后再填写内容，可以继续启用；否则建议先补上规则再生效。</p>
+      <p class="confirm-warning">继续启用不会修改系统原始 Hosts 内容，但可能让你误以为分组已经产生效果。</p>
+    </Modal>
   {/if}
   
   {#if showDeleteModal}
@@ -1105,6 +1256,11 @@
     diffSummary={previewDiffSummary}
     conflicts={mergedPreviewConflicts}
     onClose={() => { showMergedPreviewModal = false }}
+  />
+
+  <QuickStartGuideModal
+    isOpen={showQuickStartGuide}
+    onClose={closeQuickStartGuide}
   />
 
   <Toast />
@@ -1402,6 +1558,51 @@
     align-items: center;
   }
 
+  .sync-overview-grid {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .sync-overview-card {
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--sidebar-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .sync-overview-card span {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .sync-overview-card strong {
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.5;
+    word-break: break-word;
+  }
+
+  .sync-overview-card.success {
+    border-color: rgba(82, 196, 26, 0.3);
+    background: rgba(82, 196, 26, 0.08);
+  }
+
+  .sync-overview-card.warning {
+    border-color: rgba(255, 77, 79, 0.3);
+    background: rgba(255, 77, 79, 0.08);
+  }
+
+  .sync-overview-card.info {
+    border-color: rgba(24, 144, 255, 0.3);
+    background: rgba(24, 144, 255, 0.08);
+  }
+
   .sync-badge {
     display: inline-flex;
     align-items: center;
@@ -1531,6 +1732,10 @@
     .editor-actions {
       flex-wrap: wrap;
     }
+
+    .sync-overview-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
   @media (max-width: 720px) {
@@ -1551,6 +1756,10 @@
       width: 100%;
       max-width: 320px;
       flex-direction: column;
+    }
+
+    .sync-overview-grid {
+      grid-template-columns: 1fr;
     }
   }
 

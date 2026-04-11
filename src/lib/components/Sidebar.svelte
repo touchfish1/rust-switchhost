@@ -243,9 +243,22 @@
               />
             {:else}
               <span class="scheme-name" title="双击编辑名称">{scheme.name}</span>
-              <span class="scheme-date">
-                {new Date(scheme.updated_at).toLocaleDateString()}
-              </span>
+              <div class="scheme-meta-row">
+                <span class="scheme-date">
+                  {new Date(scheme.updated_at).toLocaleDateString()}
+                </span>
+                {#if scheme.remote_url}
+                  <span class={`scheme-sync-badge ${scheme.sync_status || 'idle'}`}>
+                    {scheme.sync_status === 'syncing'
+                      ? '同步中'
+                      : scheme.sync_status === 'success'
+                        ? '已同步'
+                        : scheme.sync_status === 'error'
+                          ? '同步失败'
+                          : '远程'}
+                  </span>
+                {/if}
+              </div>
             {/if}
           </div>
           
@@ -518,6 +531,50 @@
   .scheme-date {
     font-size: 12px;
     color: var(--text-secondary, #8c8c8c);
+  }
+
+  .scheme-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .scheme-sync-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--primary-color, #1890ff);
+    border: 1px solid rgba(24, 144, 255, 0.22);
+    background: rgba(24, 144, 255, 0.1);
+  }
+
+  .scheme-sync-badge.success {
+    color: #389e0d;
+    border-color: rgba(82, 196, 26, 0.22);
+    background: rgba(82, 196, 26, 0.1);
+  }
+
+  .scheme-sync-badge.error {
+    color: var(--danger-color, #ff4d4f);
+    border-color: rgba(255, 77, 79, 0.22);
+    background: rgba(255, 77, 79, 0.1);
+  }
+
+  .scheme-sync-badge.syncing {
+    color: var(--primary-color, #1890ff);
+    border-color: rgba(24, 144, 255, 0.22);
+    background: rgba(24, 144, 255, 0.14);
+  }
+
+  .scheme-item.active .scheme-sync-badge {
+    color: rgba(255, 255, 255, 0.95);
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.16);
   }
   
   .edit-input {
