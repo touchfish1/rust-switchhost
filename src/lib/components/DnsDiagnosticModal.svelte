@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { DnsLookupResult } from '$lib/types'
+  import { toasts } from '$lib/stores/toasts'
 
   export let isOpen = false
   export let domain = ''
@@ -8,6 +9,7 @@
   export let onClose: () => void
   export let onDomainChange: (value: string) => void
   export let onResolve: () => void | Promise<void>
+  const exampleDomains = ['github.com', 'api.local.test', 'demo.local.test']
 
   function handleClose() {
     onClose()
@@ -16,6 +18,25 @@
   function handleSubmit(event: Event) {
     event.preventDefault()
     onResolve()
+  }
+
+  async function copyLookupResult() {
+    if (!lookupResult) return
+
+    const payload = [
+      `域名: ${lookupResult.domain}`,
+      `状态: ${lookupResult.success ? '解析成功' : '解析失败'}`,
+      `消息: ${lookupResult.message}`,
+      `地址: ${lookupResult.addresses.join(', ') || '无'}`
+    ].join('\n')
+
+    try {
+      await navigator.clipboard.writeText(payload)
+      toasts.push('DNS 诊断结果已复制到剪贴板', 'success')
+    } catch (error) {
+      console.error('Failed to copy lookup result:', error)
+      toasts.push('复制诊断结果失败，请检查系统剪贴板权限', 'error')
+    }
   }
 </script>
 
@@ -52,11 +73,30 @@
           </button>
         </form>
 
+        <div class="example-row">
+          <span>常用示例</span>
+          <div class="example-list">
+            {#each exampleDomains as example}
+              <button
+                type="button"
+                class="example-chip"
+                on:click={() => onDomainChange(example)}
+                disabled={isResolving}
+              >
+                {example}
+              </button>
+            {/each}
+          </div>
+        </div>
+
         {#if lookupResult}
           <div class="result-card" class:error={!lookupResult.success}>
             <div class="result-head">
-              <strong>{lookupResult.success ? '解析成功' : '解析失败'}</strong>
-              <span>{lookupResult.domain}</span>
+              <div class="result-head-copy">
+                <strong>{lookupResult.success ? '解析成功' : '解析失败'}</strong>
+                <span>{lookupResult.domain}</span>
+              </div>
+              <button type="button" class="copy-btn" on:click={copyLookupResult}>复制结果</button>
             </div>
 
             <p>{lookupResult.message}</p>
@@ -201,6 +241,46 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 10px;
+  }
+
+  .example-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .example-row span {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .example-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .example-chip,
+  .copy-btn {
+    border: 1px solid var(--border-color);
+    background: var(--editor-bg);
+    color: var(--text-primary);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .example-chip:disabled,
+  .copy-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .result-head-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .result-head strong {

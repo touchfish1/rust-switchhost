@@ -1344,7 +1344,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       initialName={remoteEditTarget?.name || ''}
       initialType={remoteEditTarget ? 'remote' : createModalInitialType}
       initialRemoteUrl={remoteEditTarget?.remote_url || ''}
-      initialAutoSyncEnabled={remoteEditTarget?.auto_sync_enabled || false}
+      initialAutoSyncEnabled={remoteEditTarget ? Boolean(remoteEditTarget.auto_sync_enabled) : createModalInitialType === 'remote'}
       initialSyncIntervalMinutes={remoteEditTarget?.sync_interval_minutes ? String(remoteEditTarget.sync_interval_minutes) : '15'}
       existingSchemes={$schemesStore}
       editingSchemeId={remoteEditTarget?.id || null}

@@ -57,6 +57,7 @@
   let nameInput = $state<HTMLInputElement | null>(null)
   let remoteUrlInput = $state<HTMLInputElement | null>(null)
   let syncIntervalInput = $state<HTMLInputElement | null>(null)
+  const quickSyncIntervals = ['15', '30', '60']
 
   const selectedTemplate = $derived(
     templates.find((template) => template.id === selectedTemplateId) ?? null
@@ -242,8 +243,26 @@
             />
           </label>
 
+          <div class="quick-interval-row">
+            <span>常用间隔</span>
+            <div class="quick-interval-list">
+              {#each quickSyncIntervals as interval}
+                <button
+                  class="interval-chip"
+                  class:selected={syncIntervalMinutes.trim() === interval}
+                  type="button"
+                  onclick={() => (syncIntervalMinutes = interval)}
+                  disabled={isSubmitting || !autoSyncEnabled}
+                >
+                  {interval} 分钟
+                </button>
+              {/each}
+            </div>
+          </div>
+
           <div class="tip-box">
             创建后会先保存远程配置，再立即拉取一次内容。分组启用时，后续同步成功会自动应用到系统 Hosts。
+            远程地址建议直接使用可下载原始文本的 URL，例如 `raw.githubusercontent.com` 或你自己的 hosts 文件地址。
           </div>
         {:else if mode === 'create'}
           <div class="form-group">
@@ -441,6 +460,39 @@
     display: flex;
     align-items: center;
     gap: 10px;
+  }
+
+  .quick-interval-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .quick-interval-row span {
+    color: var(--text-secondary, #8c8c8c);
+    font-size: 12px;
+  }
+
+  .quick-interval-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .interval-chip {
+    border: 1px solid var(--border-color, #e0e0e0);
+    background: var(--editor-bg, #ffffff);
+    color: var(--text-primary, #213547);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .interval-chip.selected {
+    border-color: var(--primary-color, #1890ff);
+    color: var(--primary-color, #1890ff);
+    background: rgba(24, 144, 255, 0.08);
   }
 
   .template-grid {
