@@ -463,30 +463,32 @@
       updater.startInstall()
       appError.set(null)
       let downloadedBytes = 0
+      let totalDownloadBytes: number | null = null
 
       await currentUpdater.availableUpdate.downloadAndInstall((event: DownloadEvent) => {
         if (event.event === 'Started') {
-          const total = event.data.contentLength
+          totalDownloadBytes = typeof event.data.contentLength === 'number'
+            ? event.data.contentLength
+            : null
           downloadedBytes = 0
           updater.setProgress(
-            total
-              ? `开始下载更新，已下载 0 MB / ${(total / 1024 / 1024).toFixed(2)} MB`
+            totalDownloadBytes && totalDownloadBytes > 0
+              ? `开始下载更新，已下载 0 MB / ${(totalDownloadBytes / 1024 / 1024).toFixed(2)} MB`
               : '开始下载更新，正在连接下载源...',
             0
           )
         } else if (event.event === 'Progress') {
           downloadedBytes += event.data.chunkLength
-          const total = event.data.contentLength
-          if (total && total > 0) {
-            const progress = (downloadedBytes / total) * 100
+          if (totalDownloadBytes && totalDownloadBytes > 0) {
+            const progress = (downloadedBytes / totalDownloadBytes) * 100
             updater.setProgress(
-              `正在下载更新，已下载 ${(downloadedBytes / 1024 / 1024).toFixed(2)} MB / ${(total / 1024 / 1024).toFixed(2)} MB`,
+              `正在下载更新，已下载 ${(downloadedBytes / 1024 / 1024).toFixed(2)} MB / ${(totalDownloadBytes / 1024 / 1024).toFixed(2)} MB`,
               progress
             )
           } else {
             updater.setProgress(
               `正在下载更新，已接收 ${(downloadedBytes / 1024 / 1024).toFixed(2)} MB`,
-              null
+              downloadedBytes > 0 ? 0 : null
             )
           }
         } else if (event.event === 'Finished') {
