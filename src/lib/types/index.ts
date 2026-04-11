@@ -118,4 +118,10 @@ export interface WriteResultSummary {
   timestamp: string
 }
 
+export interface RemoteSyncPreviewState {
+  diff: HostsDiffSummary
+  diffLines: HostsDiffLine[]
+  affectedDomains: HostsAffectedDomain[]
+}
+
 export type UpdaterHandle = Update | null

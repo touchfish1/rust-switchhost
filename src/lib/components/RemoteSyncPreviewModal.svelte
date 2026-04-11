@@ -1,21 +1,41 @@
+<svelte:options runes={true} />
+
 <script lang="ts">
   import Editor from './Editor.svelte'
-  import type { HostsAffectedDomain, HostsDiffSummary } from '$lib/types'
+  import type { HostsAffectedDomain, HostsDiffLine, HostsDiffSummary } from '$lib/types'
   import { toasts } from '$lib/stores/toasts'
 
-  export let isOpen = false
-  export let schemeName = ''
-  export let remoteUrl = ''
-  export let currentContent = ''
-  export let remoteContent = ''
-  export let diffSummary: HostsDiffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
-  export let affectedDomains: HostsAffectedDomain[] = []
-  export let isLoading = false
-  export let isApplying = false
-  export let onClose: () => void
-  export let onConfirm: () => void | Promise<void>
+  type RemoteSyncPreviewModalProps = {
+    isOpen?: boolean
+    schemeName?: string
+    remoteUrl?: string
+    currentContent?: string
+    remoteContent?: string
+    diffSummary?: HostsDiffSummary
+    diffLines?: HostsDiffLine[]
+    affectedDomains?: HostsAffectedDomain[]
+    isLoading?: boolean
+    isApplying?: boolean
+    onClose?: () => void
+    onConfirm?: () => void | Promise<void>
+  }
 
-  $: conflictDomains = affectedDomains.filter((item) => item.isConflict)
+  let {
+    isOpen = false,
+    schemeName = '',
+    remoteUrl = '',
+    currentContent = '',
+    remoteContent = '',
+    diffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 },
+    diffLines = [],
+    affectedDomains = [],
+    isLoading = false,
+    isApplying = false,
+    onClose = () => {},
+    onConfirm = () => {}
+  }: RemoteSyncPreviewModalProps = $props()
+  let showOnlyDiff = $state(false)
+  const conflictDomains = $derived(affectedDomains.filter((item) => item.isConflict))
 
   async function copyConflictDomains() {
     const content = conflictDomains.map((item) => item.domain).join('\n')
@@ -29,13 +49,32 @@
       toasts.push('复制冲突域名失败，请检查系统剪贴板权限', 'error')
     }
   }
+
+  function buildDiffPreview(kind: 'added' | 'removed') {
+    return diffLines
+      .filter((item) => item.kind === kind)
+      .map((item) => item.value)
+      .join('\n')
+  }
+
+  function handleOverlayClick(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+      onClose()
+    }
+  }
+
+  function handleOverlayKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && !isApplying) {
+      onClose()
+    }
+  }
 </script>
 
 {#if isOpen}
   <div
     class="sync-preview-overlay"
-    on:click|self={onClose}
-    on:keydown={(event) => event.key === 'Escape' && !isApplying && onClose()}
+    onclick={handleOverlayClick}
+    onkeydown={handleOverlayKeydown}
     role="dialog"
     aria-modal="true"
     aria-label="同步前预览"
@@ -47,7 +86,7 @@
           <h3>同步前预览</h3>
           <p>{schemeName} · {remoteUrl}</p>
         </div>
-        <button class="close-btn" on:click={onClose} aria-label="关闭" disabled={isApplying}>×</button>
+        <button class="close-btn" onclick={onClose} aria-label="关闭" disabled={isApplying}>×</button>
       </div>
 
       <div class="sync-preview-body">
@@ -74,7 +113,7 @@
               <div class="affected-head">
                 <strong>受影响域名</strong>
                 {#if conflictDomains.length > 0}
-                  <button class="copy-conflicts" on:click={copyConflictDomains}>
+                  <button class="copy-conflicts" onclick={copyConflictDomains}>
                     复制冲突域名
                   </button>
                 {/if}
@@ -98,9 +137,13 @@
             <section class="preview-pane">
               <div class="preview-head">
                 <strong>当前分组内容</strong>
+                <label class="diff-toggle">
+                  <input type="checkbox" bind:checked={showOnlyDiff} />
+                  <span>只看变更行</span>
+                </label>
               </div>
               <div class="preview-editor">
-                <Editor content={currentContent} readOnly={true} />
+                <Editor content={showOnlyDiff ? buildDiffPreview('removed') : currentContent} readOnly={true} />
               </div>
             </section>
 
@@ -109,7 +152,7 @@
                 <strong>远程最新内容</strong>
               </div>
               <div class="preview-editor">
-                <Editor content={remoteContent} readOnly={true} />
+                <Editor content={showOnlyDiff ? buildDiffPreview('added') : remoteContent} readOnly={true} />
               </div>
             </section>
           </div>
@@ -117,8 +160,8 @@
       </div>
 
       <div class="sync-preview-footer">
-        <button class="btn-secondary" on:click={onClose} disabled={isApplying}>取消</button>
-        <button class="btn-primary" on:click={onConfirm} disabled={isLoading || isApplying}>
+        <button class="btn-secondary" onclick={onClose} disabled={isApplying}>取消</button>
+        <button class="btn-primary" onclick={onConfirm} disabled={isLoading || isApplying}>
           {isApplying ? '同步中...' : '确认同步并应用'}
         </button>
       </div>
@@ -313,6 +356,18 @@
     border-bottom: 1px solid var(--border-color);
     background: var(--sidebar-bg);
     color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .diff-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
   }
 
   .preview-editor {

@@ -59,6 +59,8 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     HostsValidationIssue,
     HostsConflictGroup,
     HostsContentStats,
+    HostsAffectedDomain,
+    HostsDiffLine,
     HostsDiffSummary,
     Scheme,
     SyncLogEntry,
@@ -144,7 +146,8 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   let remoteSyncPreviewScheme: Scheme | null = null
   let remoteSyncPreviewContent = ''
   let remoteSyncPreviewDiff: HostsDiffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
-  let remoteSyncPreviewAffectedDomains = []
+  let remoteSyncPreviewAffectedDomains: HostsAffectedDomain[] = []
+  let remoteSyncPreviewDiffLines: HostsDiffLine[] = []
   let showWriteResultDetails = false
   let writeResultSearch = ''
   const QUICK_START_STORAGE_KEY = 'quick-start-guide-dismissed-v1'
@@ -868,6 +871,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       remoteSyncPreviewScheme = currentScheme
       remoteSyncPreviewContent = await fetchRemoteHostsRequest(currentScheme.remote_url)
       remoteSyncPreviewDiff = summarizeHostsDiff(currentScheme.content, remoteSyncPreviewContent)
+      remoteSyncPreviewDiffLines = collectHostsDiffLines(currentScheme.content, remoteSyncPreviewContent)
       remoteSyncPreviewAffectedDomains = collectAffectedDomains(currentScheme.content, remoteSyncPreviewContent)
       showRemoteSyncPreviewModal = true
     } catch (e) {
@@ -891,6 +895,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       remoteSyncPreviewScheme = null
       remoteSyncPreviewContent = ''
       remoteSyncPreviewDiff = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
+      remoteSyncPreviewDiffLines = []
       remoteSyncPreviewAffectedDomains = []
     }
   }
@@ -1053,6 +1058,28 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     if (!keyword) return true
     return value.toLowerCase().includes(keyword)
   }
+
+  async function copyWriteResultDiff() {
+    if (!writeResultSummary) return
+
+    const content = writeResultSummary.diffLines
+      .filter((item) => matchesWriteResultSearch(item.value))
+      .map((item) => `${item.kind === 'added' ? '+' : '-'} ${item.value}`)
+      .join('\n')
+
+    if (!content) {
+      showToast('当前筛选条件下没有可复制的 diff 内容', 'warning')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(content)
+      showToast('写入 diff 已复制到剪贴板', 'success')
+    } catch (error) {
+      console.error('Failed to copy write result diff:', error)
+      showToast('复制 diff 失败，请检查系统剪贴板权限', 'error')
+    }
+  }
 </script>
 
 <div class="app" class:dark={$theme}>
@@ -1131,6 +1158,9 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
             {/each}
           </div>
         {/if}
+        <button class="write-result-toggle" on:click={copyWriteResultDiff}>
+          复制当前 diff
+        </button>
         <button class="write-result-toggle" on:click={() => { showWriteResultDetails = !showWriteResultDetails }}>
           {showWriteResultDetails ? '收起详细 diff' : '展开详细 diff'}
         </button>
@@ -1464,6 +1494,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     currentContent={remoteSyncPreviewScheme?.content || ''}
     remoteContent={remoteSyncPreviewContent}
     diffSummary={remoteSyncPreviewDiff}
+    diffLines={remoteSyncPreviewDiffLines}
     affectedDomains={remoteSyncPreviewAffectedDomains}
     isLoading={isLoadingRemoteSyncPreview}
     isApplying={isApplyingRemoteSyncPreview}
