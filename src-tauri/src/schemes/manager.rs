@@ -143,15 +143,17 @@ impl SchemeManager {
     }
 
     pub fn create_scheme(&mut self, name: String, content: String) -> io::Result<Scheme> {
-        let scheme = Scheme::new(name, content);
+        let normalized_name = self.validate_scheme_name(&name, None)?;
+        let scheme = Scheme::new(normalized_name, content);
         self.config.schemes.push(scheme.clone());
         self.save_config()?;
         Ok(scheme)
     }
 
     pub fn update_scheme(&mut self, id: &str, name: String, content: String) -> io::Result<Scheme> {
+        let normalized_name = self.validate_scheme_name(&name, Some(id))?;
         if let Some(scheme) = self.config.schemes.iter_mut().find(|s| s.id == id) {
-            scheme.name = name;
+            scheme.name = normalized_name;
             scheme.content = content;
             scheme.updated_at = Utc::now();
             let updated = scheme.clone();
@@ -537,6 +539,31 @@ impl SchemeManager {
             }
             index += 1;
         }
+    }
+
+    fn validate_scheme_name(&self, name: &str, exclude_id: Option<&str>) -> io::Result<String> {
+        let trimmed_name = name.trim();
+        if trimmed_name.is_empty() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "分组名称不能为空"));
+        }
+
+        let normalized = trimmed_name.to_lowercase();
+        let duplicated = self.config.schemes.iter().any(|scheme| {
+            if exclude_id == Some(scheme.id.as_str()) {
+                return false;
+            }
+
+            scheme.name.trim().to_lowercase() == normalized
+        });
+
+        if duplicated {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("已存在同名分组「{}」", trimmed_name),
+            ));
+        }
+
+        Ok(trimmed_name.to_string())
     }
 
     fn push_sync_log(scheme: &mut Scheme, status: &str, trigger: &str, message: String) {

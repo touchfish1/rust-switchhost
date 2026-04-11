@@ -1,7 +1,7 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
-  import type { SchemeTemplate } from '$lib/types'
+  import type { Scheme, SchemeTemplate } from '$lib/types'
 
   type ConfirmPayload = {
     name: string
@@ -21,6 +21,8 @@
     initialRemoteUrl?: string
     initialAutoSyncEnabled?: boolean
     initialSyncIntervalMinutes?: string
+    existingSchemes?: Scheme[]
+    editingSchemeId?: string | null
     templates?: SchemeTemplate[]
     onDeleteTemplate?: (id: string) => void
     onClose?: () => void
@@ -36,6 +38,8 @@
     initialRemoteUrl = '',
     initialAutoSyncEnabled = true,
     initialSyncIntervalMinutes = '15',
+    existingSchemes = [],
+    editingSchemeId = null,
     templates = [],
     onDeleteTemplate = () => {},
     onClose = () => {},
@@ -49,10 +53,40 @@
   let syncIntervalMinutes = $state('15')
   let selectedTemplateId = $state<string | null>('blank')
   let wasOpen = $state(false)
+  let hasAttemptedSubmit = $state(false)
+  let nameInput = $state<HTMLInputElement | null>(null)
+  let remoteUrlInput = $state<HTMLInputElement | null>(null)
+  let syncIntervalInput = $state<HTMLInputElement | null>(null)
 
   const selectedTemplate = $derived(
     templates.find((template) => template.id === selectedTemplateId) ?? null
   )
+
+  const duplicateScheme = $derived.by(() => {
+    const trimmedName = name.trim()
+    if (!trimmedName) return null
+
+    return existingSchemes.find((scheme) =>
+      scheme.id !== editingSchemeId &&
+      scheme.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    ) ?? null
+  })
+
+  const validationMessage = $derived.by(() => {
+    const trimmedName = name.trim()
+    const trimmedRemoteUrl = remoteUrl.trim()
+    const parsedInterval = Number(syncIntervalMinutes.trim())
+
+    if (!hasAttemptedSubmit && !duplicateScheme) return ''
+    if (!trimmedName) return '请输入分组名称'
+    if (duplicateScheme) return `已存在同名分组「${duplicateScheme.name}」`
+    if (schemeType === 'remote' && !trimmedRemoteUrl) return '请输入远程 URL'
+    if (schemeType === 'remote' && autoSyncEnabled && (!Number.isFinite(parsedInterval) || parsedInterval <= 0)) {
+      return '请输入大于 0 的同步间隔'
+    }
+
+    return ''
+  })
 
   $effect(() => {
     if (isOpen && !wasOpen) {
@@ -62,21 +96,44 @@
       autoSyncEnabled = initialAutoSyncEnabled
       syncIntervalMinutes = initialSyncIntervalMinutes
       selectedTemplateId = templates[0]?.id ?? null
+      hasAttemptedSubmit = false
       wasOpen = true
     } else if (!isOpen && wasOpen) {
+      hasAttemptedSubmit = false
       wasOpen = false
     }
   })
 
   function handleClose() {
+    hasAttemptedSubmit = false
     onClose()
   }
 
   function handleConfirm() {
+    const trimmedName = name.trim()
+    const trimmedRemoteUrl = remoteUrl.trim()
+    const parsedInterval = Number(syncIntervalMinutes.trim())
+    hasAttemptedSubmit = true
+
+    if (!trimmedName || duplicateScheme) {
+      nameInput?.focus()
+      return
+    }
+
+    if (schemeType === 'remote' && !trimmedRemoteUrl) {
+      remoteUrlInput?.focus()
+      return
+    }
+
+    if (schemeType === 'remote' && autoSyncEnabled && (!Number.isFinite(parsedInterval) || parsedInterval <= 0)) {
+      syncIntervalInput?.focus()
+      return
+    }
+
     onConfirm({
-      name: name.trim(),
+      name: trimmedName,
       type: schemeType,
-      remoteUrl: remoteUrl.trim(),
+      remoteUrl: trimmedRemoteUrl,
       autoSyncEnabled,
       syncIntervalMinutes: syncIntervalMinutes.trim(),
       templateId: schemeType === 'local' ? selectedTemplateId : null
@@ -100,19 +157,25 @@
           <h3>{mode === 'edit-remote' ? '编辑远程分组' : '创建新分组'}</h3>
           <p>{mode === 'edit-remote' ? '修改远程 URL、同步开关和同步间隔' : '支持创建普通分组或远程 URL 分组'}</p>
         </div>
-        <button class="close-btn" onclick={handleClose} aria-label="关闭">×</button>
+        <button class="close-btn" type="button" onclick={handleClose} aria-label="关闭">×</button>
       </div>
 
       <div class="modal-body">
         <label class="form-group">
           <span>分组名称</span>
           <input
+            bind:this={nameInput}
             type="text"
             bind:value={name}
             placeholder="例如：开发环境 / 公司代理 / GitHub 镜像"
             disabled={isSubmitting}
+            aria-invalid={(hasAttemptedSubmit && (!name.trim() || duplicateScheme)) ? 'true' : 'false'}
           />
         </label>
+
+        {#if validationMessage}
+          <p class="validation-message">{validationMessage}</p>
+        {/if}
 
         {#if mode === 'create'}
           <div class="form-group">
@@ -122,7 +185,10 @@
                 class="type-card"
                 class:selected={schemeType === 'local'}
                 type="button"
-                onclick={() => (schemeType = 'local')}
+                onclick={() => {
+                  schemeType = 'local'
+                  hasAttemptedSubmit = false
+                }}
                 disabled={isSubmitting}
               >
                 <strong>本地分组</strong>
@@ -133,7 +199,10 @@
                 class="type-card"
                 class:selected={schemeType === 'remote'}
                 type="button"
-                onclick={() => (schemeType = 'remote')}
+                onclick={() => {
+                  schemeType = 'remote'
+                  hasAttemptedSubmit = false
+                }}
                 disabled={isSubmitting}
               >
                 <strong>远程 URL</strong>
@@ -147,6 +216,7 @@
           <label class="form-group">
             <span>远程 URL</span>
             <input
+              bind:this={remoteUrlInput}
               type="url"
               bind:value={remoteUrl}
               placeholder="https://example.com/hosts.txt"
@@ -162,6 +232,7 @@
           <label class="form-group">
             <span>同步间隔（分钟）</span>
             <input
+              bind:this={syncIntervalInput}
               type="number"
               min="1"
               step="1"
@@ -322,6 +393,13 @@
   .form-group input:focus {
     outline: none;
     border-color: var(--primary-color, #1890ff);
+  }
+
+  .validation-message {
+    margin: -8px 0 0;
+    color: var(--danger-color, #ff4d4f);
+    font-size: 13px;
+    line-height: 1.5;
   }
 
   .type-grid {

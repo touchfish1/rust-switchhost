@@ -15,8 +15,15 @@
   import SyncLogModal from './components/SyncLogModal.svelte'
   import CurrentHostsModal from './components/CurrentHostsModal.svelte'
   import UpdateModal from './components/UpdateModal.svelte'
+  import MergedHostsPreviewModal from './components/MergedHostsPreviewModal.svelte'
   import Toast from './components/Toast.svelte'
   import { getSchemeTemplateContent } from '$lib/data/templates'
+  import {
+    buildMergedHostsContent,
+    detectHostsConflicts,
+    summarizeHostsContent,
+    summarizeHostsDiff
+  } from '$lib/utils/hosts-analysis'
   import { getAppVersion, restartApp } from '$lib/services/app'
   import {
     checkHostsPermission as fetchHostsPermission,
@@ -40,7 +47,15 @@
     updateSchemeRemoteConfig as updateSchemeRemoteConfigRequest
   } from '$lib/services/schemes'
   import { checkForUpdates } from '$lib/services/updater'
-  import type { DnsLookupResult, HostsBackupEntry, Scheme, SyncLogEntry } from '$lib/types'
+  import type {
+    DnsLookupResult,
+    HostsBackupEntry,
+    HostsConflictGroup,
+    HostsContentStats,
+    HostsDiffSummary,
+    Scheme,
+    SyncLogEntry
+  } from '$lib/types'
   import { appError, appVersion, hostsPermissionInfo, loadingFlags } from '$lib/stores/app'
   import {
     activeScheme as activeSchemeStore,
@@ -50,6 +65,7 @@
     removeScheme,
     schemes as schemesStore,
     selectScheme,
+    setEditorContent,
     setSchemes,
     upsertScheme
   } from '$lib/stores/schemes'
@@ -64,16 +80,20 @@
   let showBackupHistoryModal = false
   let showDnsDiagnosticModal = false
   let showSyncLogModal = false
+  let showMergedPreviewModal = false
   let createModalMode: 'create' | 'edit-remote' = 'create'
+  let createModalInitialType: 'local' | 'remote' = 'local'
   let remoteEditTarget: Scheme | null = null
   let deleteTargetId: string | null = null
   let currentHostsContent = ''
+  let mergedPreviewCurrentContent = ''
   let isFlushingDns = false
   let updateCheckTimer: ReturnType<typeof setInterval> | null = null
   let isSyncingRemoteScheme = false
   let isCreatingScheme = false
   let isImportingSchemes = false
   let isExportingSchemes = false
+  let isOpeningMergedPreview = false
   let isOpeningCurrentHosts = false
   let isOpeningBackupHistory = false
   let isResolvingDns = false
@@ -88,6 +108,45 @@
   let dnsLookupResult: DnsLookupResult | null = null
   let syncEventUnlisten: UnlistenFn | null = null
   const syncingSchemeIds = new Set<string>()
+  let schemesForAnalysis: Scheme[] = []
+  let activeSchemeSnapshot: Scheme | null = null
+  let enabledSchemesForAnalysis: Scheme[] = []
+  let previewSourceSchemes: Scheme[] = []
+  let previewMergedHostsContent = ''
+  let previewScopeLabel = ''
+  let previewNote = ''
+  let previewCurrentStats: HostsContentStats = { lineCount: 0, hostEntryCount: 0, commentCount: 0 }
+  let previewMergedStats: HostsContentStats = { lineCount: 0, hostEntryCount: 0, commentCount: 0 }
+  let previewDiffSummary: HostsDiffSummary = { addedLines: 0, removedLines: 0, unchangedLines: 0 }
+  let mergedPreviewConflicts: HostsConflictGroup[] = []
+  let activeSchemeConflicts: HostsConflictGroup[] = []
+
+  $: schemesForAnalysis = $schemesStore.map((scheme) =>
+    scheme.id === $activeSchemeIdStore ? { ...scheme, content: $editorContentStore } : scheme
+  )
+  $: activeSchemeSnapshot = schemesForAnalysis.find((scheme) => scheme.id === $activeSchemeIdStore) || null
+  $: enabledSchemesForAnalysis = schemesForAnalysis.filter((scheme) => scheme.enabled)
+  $: previewSourceSchemes = enabledSchemesForAnalysis.length > 0
+    ? enabledSchemesForAnalysis
+    : activeSchemeSnapshot
+      ? [activeSchemeSnapshot]
+      : []
+  $: previewMergedHostsContent = buildMergedHostsContent(previewSourceSchemes)
+  $: mergedPreviewConflicts = detectHostsConflicts(previewSourceSchemes)
+  $: activeSchemeConflicts = activeSchemeSnapshot ? detectHostsConflicts([activeSchemeSnapshot]) : []
+  $: previewScopeLabel = enabledSchemesForAnalysis.length > 0
+    ? `当前已启用的 ${enabledSchemesForAnalysis.length} 个分组`
+    : activeSchemeSnapshot
+      ? `当前选中的分组「${activeSchemeSnapshot.name}」`
+      : '暂无可预览的分组'
+  $: previewNote = enabledSchemesForAnalysis.length > 0
+    ? ''
+    : activeSchemeSnapshot
+      ? '当前还没有启用中的分组，下面展示的是当前选中分组的预计结果。'
+      : '请先创建或启用分组后再进行预览。'
+  $: previewCurrentStats = summarizeHostsContent(mergedPreviewCurrentContent)
+  $: previewMergedStats = summarizeHostsContent(previewMergedHostsContent)
+  $: previewDiffSummary = summarizeHostsDiff(mergedPreviewCurrentContent, previewMergedHostsContent)
 
   onMount(async () => {
     const savedSidebarWidth = localStorage.getItem('sidebar-width')
@@ -377,8 +436,9 @@
     }
   }
   
-  function openCreateModal() {
+  function openCreateModal(initialType: 'local' | 'remote' = 'local') {
     createModalMode = 'create'
+    createModalInitialType = initialType
     remoteEditTarget = null
     showCreateModal = true
   }
@@ -407,8 +467,16 @@
     const syncIntervalMinutes = syncIntervalInput ? Number(syncIntervalInput) : null
     const templateContent = getSchemeTemplateContent(detail.templateId)
     const currentSchemes = get(schemesStore)
+    const duplicatedScheme = currentSchemes.find((scheme) =>
+      scheme.id !== remoteEditTarget?.id &&
+      scheme.name.trim().toLowerCase() === name?.toLowerCase()
+    )
 
     if (!name) return
+    if (duplicatedScheme) {
+      appError.set(`已存在同名分组「${duplicatedScheme.name}」`)
+      return
+    }
     if (type === 'remote' && !remoteUrl) {
       appError.set('远程 URL 分组必须填写远程地址')
       return
@@ -465,6 +533,7 @@
 
       upsertScheme(newScheme)
       showCreateModal = false
+      createModalInitialType = 'local'
 
       if (type === 'remote') {
         try {
@@ -475,6 +544,8 @@
           appError.set(`远程分组已创建，但首次同步失败: ${syncError}`)
           console.error('Failed to sync new remote scheme:', syncError)
         }
+      } else {
+        showToast('本地分组已创建', 'success')
       }
     } catch (e) {
       appError.set(`创建分组失败: ${e}`)
@@ -500,6 +571,22 @@
   function handleDeleteTemplate(id: string) {
     customTemplates.deleteTemplate(id)
     showToast('自定义模板已删除', 'success')
+  }
+
+  async function openMergedPreviewModal() {
+    if (previewSourceSchemes.length === 0) return
+
+    try {
+      isOpeningMergedPreview = true
+      appError.set(null)
+      mergedPreviewCurrentContent = await getHostsContent()
+      showMergedPreviewModal = true
+    } catch (e) {
+      appError.set(`读取当前 Hosts 失败: ${e}`)
+      console.error('Failed to get hosts content for preview:', e)
+    } finally {
+      isOpeningMergedPreview = false
+    }
   }
   
   function openDeleteModal(id: string) {
@@ -788,6 +875,27 @@
             <span class="scheme-meta">
               分组内容编辑中 | 创建于 {new Date($activeSchemeStore.created_at).toLocaleString()}
             </span>
+            <div class="analysis-row">
+              <span class="analysis-chip">
+                {enabledSchemesForAnalysis.length > 0
+                  ? `已启用 ${enabledSchemesForAnalysis.length} 个分组`
+                  : '当前未启用分组'}
+              </span>
+              {#if mergedPreviewConflicts.length > 0}
+                <span class="analysis-chip warning">
+                  合并冲突 {mergedPreviewConflicts.length} 个域名
+                </span>
+              {:else if previewSourceSchemes.length > 0}
+                <span class="analysis-chip success">
+                  {enabledSchemesForAnalysis.length > 0 ? '合并结果未发现冲突' : '当前分组未发现冲突'}
+                </span>
+              {/if}
+              {#if activeSchemeConflicts.length > 0 && !$activeSchemeStore.enabled}
+                <span class="analysis-chip warning">
+                  当前分组内存在 {activeSchemeConflicts.length} 个冲突域名
+                </span>
+              {/if}
+            </div>
             {#if $activeSchemeStore.remote_url}
               <span class="remote-meta">
                 远程源已配置
@@ -811,6 +919,13 @@
             {/if}
           </div>
           <div class="editor-actions">
+            <button
+              class="btn-secondary"
+              on:click={openMergedPreviewModal}
+              disabled={isOpeningMergedPreview || previewSourceSchemes.length === 0}
+            >
+              {isOpeningMergedPreview ? '生成预览中...' : '合并预览'}
+            </button>
             <button class="btn-secondary" on:click={handleSaveCurrentSchemeAsTemplate}>
               保存为模板
             </button>
@@ -837,10 +952,16 @@
       {:else}
         <div class="empty-state">
           <h2>欢迎使用 Rust SwitchHost</h2>
-          <p>请从左侧选择一个分组，或创建新分组开始使用</p>
-          <button class="btn-primary" on:click={openCreateModal}>
-            创建第一个分组
-          </button>
+          <p>请从左侧选择一个分组，或先创建本地/远程分组开始使用</p>
+          <div class="empty-actions">
+            <button class="btn-primary" on:click={() => openCreateModal('local')}>
+              新建本地分组
+            </button>
+            <button class="btn-secondary" on:click={() => openCreateModal('remote')}>
+              新建远程分组
+            </button>
+          </div>
+          <span class="empty-hint">本地分组适合手动维护，远程分组适合团队共享与定时同步。</span>
         </div>
       {/if}
     </div>
@@ -852,10 +973,12 @@
       isSubmitting={isCreatingScheme}
       mode={createModalMode}
       initialName={remoteEditTarget?.name || ''}
-      initialType={remoteEditTarget ? 'remote' : 'local'}
+      initialType={remoteEditTarget ? 'remote' : createModalInitialType}
       initialRemoteUrl={remoteEditTarget?.remote_url || ''}
       initialAutoSyncEnabled={remoteEditTarget?.auto_sync_enabled || false}
       initialSyncIntervalMinutes={remoteEditTarget?.sync_interval_minutes ? String(remoteEditTarget.sync_interval_minutes) : '15'}
+      existingSchemes={$schemesStore}
+      editingSchemeId={remoteEditTarget?.id || null}
       templates={$schemeTemplates}
       onDeleteTemplate={handleDeleteTemplate}
       onConfirm={handleCreateConfirm}
@@ -863,6 +986,7 @@
         showCreateModal = false
         remoteEditTarget = null
         createModalMode = 'create'
+        createModalInitialType = 'local'
       }}
     />
   {/if}
@@ -932,6 +1056,19 @@
       onClose={() => { showSyncLogModal = false }}
     />
   {/if}
+
+  <MergedHostsPreviewModal
+    isOpen={showMergedPreviewModal}
+    currentContent={mergedPreviewCurrentContent}
+    mergedContent={previewMergedHostsContent}
+    {previewScopeLabel}
+    note={previewNote}
+    currentStats={previewCurrentStats}
+    mergedStats={previewMergedStats}
+    diffSummary={previewDiffSummary}
+    conflicts={mergedPreviewConflicts}
+    onClose={() => { showMergedPreviewModal = false }}
+  />
 
   <Toast />
 </div>
@@ -1173,6 +1310,38 @@
     min-width: 0;
   }
 
+  .analysis-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .analysis-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid var(--border-color);
+    background: var(--sidebar-bg);
+    color: var(--text-secondary);
+  }
+
+  .analysis-chip.success {
+    color: #389e0d;
+    background: rgba(82, 196, 26, 0.12);
+    border-color: rgba(82, 196, 26, 0.3);
+  }
+
+  .analysis-chip.warning {
+    color: #cf1322;
+    background: rgba(255, 77, 79, 0.12);
+    border-color: rgba(255, 77, 79, 0.3);
+  }
+
   .editor-actions {
     display: flex;
     align-items: center;
@@ -1257,6 +1426,17 @@
     font-size: 16px;
   }
 
+  .empty-actions {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .empty-hint {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
   .initial-loading {
     flex: 1;
     display: flex;
@@ -1295,6 +1475,39 @@
     margin: 0;
     font-size: 13px;
     color: var(--danger-color, #ff4d4f);
+  }
+
+  @media (max-width: 1080px) {
+    .editor-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .editor-actions {
+      flex-wrap: wrap;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .header {
+      height: auto;
+      padding: 16px;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+    }
+
+    .header-actions,
+    .empty-actions {
+      flex-wrap: wrap;
+    }
+
+    .empty-actions {
+      width: 100%;
+      max-width: 320px;
+      flex-direction: column;
+    }
   }
 
 </style>

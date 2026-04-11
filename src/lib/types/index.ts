@@ -74,4 +74,26 @@ export interface SchemeTemplate {
   source?: 'builtin' | 'custom'
 }
 
+export interface HostsConflictMapping {
+  ip: string
+  schemeNames: string[]
+}
+
+export interface HostsConflictGroup {
+  domain: string
+  mappings: HostsConflictMapping[]
+}
+
+export interface HostsContentStats {
+  lineCount: number
+  hostEntryCount: number
+  commentCount: number
+}
+
+export interface HostsDiffSummary {
+  addedLines: number
+  removedLines: number
+  unchangedLines: number
+}
+
 export type UpdaterHandle = Update | null

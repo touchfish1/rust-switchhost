@@ -70,7 +70,7 @@
     <div class="modal-container" class:danger={type === 'danger'} role="document">
       <div class="modal-header">
         <h3>{title}</h3>
-        <button class="close-btn" onclick={handleCancel} aria-label="关闭">×</button>
+        <button class="close-btn" type="button" onclick={handleCancel} aria-label="关闭">×</button>
       </div>
       
       <div class="modal-body">
@@ -91,12 +91,13 @@
       
       <div class="modal-footer">
         {#if showCancel}
-          <button class="btn btn-default" onclick={handleCancel}>
+          <button class="btn btn-default" type="button" onclick={handleCancel}>
             {cancelText}
           </button>
         {/if}
         <button 
           class="btn" 
+          type="button"
           class:btn-primary={type === 'default'}
           class:btn-danger={type === 'danger'}
           onclick={handleConfirm}

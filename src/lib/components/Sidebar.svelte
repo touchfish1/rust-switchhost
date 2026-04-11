@@ -168,7 +168,8 @@
       <div class="toolbar-group">
         <button 
           class="btn-new" 
-          onclick={createNewScheme} 
+          type="button"
+          onclick={createNewScheme}
           title="新建分组 (Ctrl+N)"
         >
           <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
@@ -180,6 +181,7 @@
       <div class="toolbar-group toolbar-group-muted">
         <button
           class="btn-toolbar"
+          type="button"
           onclick={importSchemes}
           title="导入分组"
           aria-label="导入分组"
@@ -192,6 +194,7 @@
         </button>
         <button
           class="btn-toolbar"
+          type="button"
           onclick={exportSchemes}
           title="导出分组"
           aria-label="导出分组"
@@ -211,7 +214,7 @@
       <div class="empty-state">
         <div class="empty-icon">📋</div>
         <p>暂无分组</p>
-        <button class="btn-create" onclick={createNewScheme}>
+        <button class="btn-create" type="button" onclick={createNewScheme}>
           创建第一个分组
         </button>
       </div>
@@ -259,6 +262,7 @@
               
               <button
                 class="btn-edit"
+                type="button"
                 onclick={(e) => scheme.remote_url ? editRemoteScheme(scheme.id, e) : startEdit(scheme.id, scheme.name, e)}
                 title={scheme.remote_url ? '编辑远程配置' : '编辑名称'}
                 aria-label={scheme.remote_url ? '编辑远程配置' : '编辑名称'}
@@ -271,6 +275,7 @@
               
               <button
                 class="btn-delete"
+                type="button"
                 onclick={(e) => deleteScheme(scheme.id, e)}
                 title="删除分组"
                 aria-label="删除分组"
