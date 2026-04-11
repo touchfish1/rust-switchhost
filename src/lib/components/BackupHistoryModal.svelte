@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { HostsBackupEntry } from '$lib/types'
+  import { toasts } from '$lib/stores/toasts'
 
   export let isOpen = false
   export let backups: HostsBackupEntry[] = []
@@ -10,6 +11,7 @@
   export let onClose: () => void
   export let onSelectBackup: (path: string) => void | Promise<void>
   export let onRestoreBackup: (path: string) => void | Promise<void>
+  let keyword = ''
 
   function handleClose() {
     onClose()
@@ -19,6 +21,39 @@
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
     return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+  }
+
+  $: normalizedKeyword = keyword.trim().toLowerCase()
+  $: filteredBackups = backups.filter((backup) => {
+    if (!normalizedKeyword) return true
+
+    const haystack = [
+      backup.filename,
+      new Date(backup.created_at).toLocaleString(),
+      `${backup.host_entry_count} 条规则`,
+      `${backup.comment_count} 条注释`,
+      `${backup.line_count} 行`
+    ]
+      .join(' ')
+      .toLowerCase()
+
+    return haystack.includes(normalizedKeyword)
+  })
+  $: selectedBackupEntry = backups.find((backup) => backup.path === selectedBackupPath) || null
+
+  async function copySelectedBackupContent() {
+    if (!selectedBackupContent) {
+      toasts.push('当前没有可复制的备份内容', 'warning')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(selectedBackupContent)
+      toasts.push('备份内容已复制到剪贴板', 'success')
+    } catch (error) {
+      console.error('Failed to copy backup content:', error)
+      toasts.push('复制备份内容失败，请检查系统剪贴板权限', 'error')
+    }
   }
 </script>
 
@@ -45,13 +80,22 @@
         <aside class="backup-list">
           <div class="backup-list-head">
             <strong>最近备份</strong>
-            <span>{backups.length} 条</span>
+            <span>{filteredBackups.length} / {backups.length} 条</span>
           </div>
+          <input
+            class="backup-search"
+            type="text"
+            bind:value={keyword}
+            placeholder="按文件名、时间或统计信息搜索备份"
+            disabled={isRestoring}
+          />
 
           {#if backups.length === 0}
             <div class="empty-state">暂时还没有可恢复的备份</div>
+          {:else if filteredBackups.length === 0}
+            <div class="empty-state">没有匹配当前搜索条件的备份</div>
           {:else}
-            {#each backups as backup (backup.path)}
+            {#each filteredBackups as backup (backup.path)}
               <button
                 class="backup-item"
                 class:selected={selectedBackupPath === backup.path}
@@ -76,21 +120,29 @@
             <div>
               <strong>内容预览</strong>
               <span>
-                {#if selectedBackupPath}
-                  已选择一个备份版本
+                {#if selectedBackupEntry}
+                  {selectedBackupEntry.filename} · {new Date(selectedBackupEntry.created_at).toLocaleString()}
                 {:else}
                   请选择左侧备份查看内容
                 {/if}
               </span>
             </div>
-
-            <button
-              class="restore-btn"
-              on:click={() => onRestoreBackup(selectedBackupPath)}
-              disabled={!selectedBackupPath || isLoadingContent || isRestoring}
-            >
-              {isRestoring ? '恢复中...' : '恢复这个版本'}
-            </button>
+            <div class="backup-actions">
+              <button
+                class="copy-btn"
+                on:click={copySelectedBackupContent}
+                disabled={!selectedBackupContent || isLoadingContent || isRestoring}
+              >
+                复制内容
+              </button>
+              <button
+                class="restore-btn"
+                on:click={() => onRestoreBackup(selectedBackupPath)}
+                disabled={!selectedBackupPath || isLoadingContent || isRestoring}
+              >
+                {isRestoring ? '恢复中...' : '恢复这个版本'}
+              </button>
+            </div>
           </div>
 
           {#if isLoadingContent}
@@ -204,6 +256,22 @@
     font-size: 12px;
   }
 
+  .backup-search {
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: var(--editor-bg);
+    color: var(--text-primary);
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
+  .backup-search:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.12);
+  }
+
   .backup-item {
     border: 1px solid var(--border-color);
     background: var(--editor-bg);
@@ -248,17 +316,34 @@
     min-width: 0;
   }
 
+  .backup-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .copy-btn,
   .restore-btn {
     padding: 9px 14px;
-    border: none;
     border-radius: 8px;
-    background: var(--primary-color);
-    color: #fff;
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
   }
 
+  .copy-btn {
+    border: 1px solid var(--border-color);
+    background: var(--editor-bg);
+    color: var(--text-primary);
+  }
+
+  .restore-btn {
+    border: none;
+    background: var(--primary-color);
+    color: #fff;
+  }
+
+  .copy-btn:disabled,
   .restore-btn:disabled,
   .backup-item:disabled {
     opacity: 0.6;
@@ -309,6 +394,11 @@
     .backup-preview-head {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .backup-actions {
+      width: 100%;
+      justify-content: space-between;
     }
   }
 </style>
