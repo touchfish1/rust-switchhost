@@ -2,9 +2,11 @@
   import { onDestroy, onMount } from 'svelte'
   import { get } from 'svelte/store'
   import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+  import { LogicalSize } from '@tauri-apps/api/dpi'
   import { open as openDialog, save } from '@tauri-apps/plugin-dialog'
   import { open } from '@tauri-apps/plugin-shell'
   import { type DownloadEvent } from '@tauri-apps/plugin-updater'
+  import { getCurrentWindow } from '@tauri-apps/api/window'
   import Sidebar from './components/Sidebar.svelte'
   import Editor from './components/Editor.svelte'
   import ThemeToggle from './components/ThemeToggle.svelte'
@@ -121,6 +123,7 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   let diagnosticDomain = ''
   let dnsLookupResult: DnsLookupResult | null = null
   let syncEventUnlisten: UnlistenFn | null = null
+  let windowResizeUnlisten: UnlistenFn | null = null
   const syncingSchemeIds = new Set<string>()
   let schemesForAnalysis: Scheme[] = []
   let activeSchemeSnapshot: Scheme | null = null
@@ -148,6 +151,10 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   let remoteSyncPreviewAffectedDomains: HostsAffectedDomain[] = []
   let remoteSyncPreviewDiffLines: HostsDiffLine[] = []
   const QUICK_START_STORAGE_KEY = 'quick-start-guide-dismissed-v1'
+  const WINDOW_WIDTH_STORAGE_KEY = 'window-width'
+  const WINDOW_HEIGHT_STORAGE_KEY = 'window-height'
+  const WINDOW_MAXIMIZED_STORAGE_KEY = 'window-maximized'
+  let persistWindowSizeTimer: ReturnType<typeof setTimeout> | null = null
   const editorTips = [
     '格式：IP 域名1 域名2',
     '注释请以 # 开头',
@@ -194,6 +201,10 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
     theme.initialize()
     customTemplates.initialize()
     sidebarWidth = savedSidebarWidth ? Math.min(520, Math.max(280, Number(savedSidebarWidth) || 320)) : 320
+    await restoreWindowState()
+    windowResizeUnlisten = await getCurrentWindow().onResized(() => {
+      queuePersistWindowState()
+    })
     loadingFlags.start('initial')
 
     try {
@@ -223,9 +234,19 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
   })
 
   onDestroy(() => {
+    if (persistWindowSizeTimer) {
+      clearTimeout(persistWindowSizeTimer)
+      persistWindowSizeTimer = null
+    }
+
     if (updateCheckTimer) {
       clearInterval(updateCheckTimer)
       updateCheckTimer = null
+    }
+
+    if (windowResizeUnlisten) {
+      windowResizeUnlisten()
+      windowResizeUnlisten = null
     }
 
     if (syncEventUnlisten) {
@@ -233,6 +254,57 @@ import { builtinSchemeTemplates, getSchemeTemplateContent } from '$lib/data/temp
       syncEventUnlisten = null
     }
   })
+
+  async function restoreWindowState() {
+    const appWindow = getCurrentWindow()
+    const savedWidth = Number(localStorage.getItem(WINDOW_WIDTH_STORAGE_KEY) || '')
+    const savedHeight = Number(localStorage.getItem(WINDOW_HEIGHT_STORAGE_KEY) || '')
+    const shouldMaximize = localStorage.getItem(WINDOW_MAXIMIZED_STORAGE_KEY) === '1'
+
+    try {
+      if (Number.isFinite(savedWidth) && Number.isFinite(savedHeight) && savedWidth > 0 && savedHeight > 0) {
+        await appWindow.setSize(new LogicalSize(savedWidth, savedHeight))
+      }
+
+      if (shouldMaximize) {
+        await appWindow.maximize()
+      }
+    } catch (error) {
+      console.error('Failed to restore window state:', error)
+    }
+  }
+
+  function queuePersistWindowState() {
+    if (persistWindowSizeTimer) {
+      clearTimeout(persistWindowSizeTimer)
+    }
+
+    persistWindowSizeTimer = setTimeout(() => {
+      persistWindowSizeTimer = null
+      void persistWindowState()
+    }, 180)
+  }
+
+  async function persistWindowState() {
+    const appWindow = getCurrentWindow()
+
+    try {
+      const maximized = await appWindow.isMaximized()
+      localStorage.setItem(WINDOW_MAXIMIZED_STORAGE_KEY, maximized ? '1' : '0')
+
+      if (maximized) {
+        return
+      }
+
+      const scaleFactor = await appWindow.scaleFactor()
+      const size = await appWindow.innerSize()
+      const logicalSize = size.toLogical(scaleFactor)
+      localStorage.setItem(WINDOW_WIDTH_STORAGE_KEY, String(Math.round(logicalSize.width)))
+      localStorage.setItem(WINDOW_HEIGHT_STORAGE_KEY, String(Math.round(logicalSize.height)))
+    } catch (error) {
+      console.error('Failed to persist window state:', error)
+    }
+  }
 
   async function loadAppVersion() {
     try {
