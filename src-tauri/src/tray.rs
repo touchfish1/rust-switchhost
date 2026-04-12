@@ -1,6 +1,11 @@
-use std::time::{Duration, Instant};
+use std::{
+    fs,
+    io,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sysinfo::{Networks, System, MINIMUM_CPU_UPDATE_INTERVAL};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -11,9 +16,10 @@ use tauri::{
 
 const METRICS_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const METRICS_WINDOW_LABEL: &str = "tray-metrics";
-const METRICS_WINDOW_WIDTH: f64 = 320.0;
-const METRICS_WINDOW_HEIGHT: f64 = 188.0;
+const METRICS_WINDOW_WIDTH: f64 = 360.0;
+const METRICS_WINDOW_HEIGHT: f64 = 280.0;
 const METRICS_WINDOW_MARGIN: i32 = 14;
+const METRICS_WINDOW_STATE_FILE: &str = "tray-metrics-window.json";
 
 pub struct TrayController<R: Runtime> {
     tray: TrayIcon<R>,
@@ -29,6 +35,12 @@ struct MetricsSnapshot {
     total_memory: u64,
     download_bytes_per_sec: u64,
     upload_bytes_per_sec: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub struct TrayMetricsWindowState {
+    pub x: i32,
+    pub y: i32,
 }
 
 impl MetricsSnapshot {
@@ -269,6 +281,17 @@ fn position_metrics_window<R: Runtime>(
     let height = (METRICS_WINDOW_HEIGHT * scale_factor).round() as i32;
     let margin = (f64::from(METRICS_WINDOW_MARGIN) * scale_factor).round() as i32;
 
+    if let Ok(Some(saved_state)) = load_saved_metrics_window_state() {
+        if let Some((saved_x, saved_y)) =
+            saved_window_position(app, saved_state, width, height, margin)
+        {
+            let _ = window.set_position(Position::Physical(PhysicalPosition::new(
+                saved_x, saved_y,
+            )));
+            return;
+        }
+    }
+
     let (target_x, target_y) = match anchor {
         Some(point) => anchored_position(point, work_area, width, height, margin),
         None => fallback_corner_position(work_area, width, height, margin),
@@ -277,6 +300,31 @@ fn position_metrics_window<R: Runtime>(
     let _ = window.set_position(Position::Physical(PhysicalPosition::new(
         target_x, target_y,
     )));
+}
+
+fn saved_window_position<R: Runtime>(
+    app: &AppHandle<R>,
+    state: TrayMetricsWindowState,
+    width: i32,
+    height: i32,
+    margin: i32,
+) -> Option<(i32, i32)> {
+    let monitor = app
+        .monitor_from_point(state.x as f64, state.y as f64)
+        .ok()
+        .flatten()
+        .or_else(|| app.primary_monitor().ok().flatten())?;
+
+    let work_area = monitor.work_area();
+    let left = work_area.position.x + margin;
+    let top = work_area.position.y + margin;
+    let right = work_area.position.x + work_area.size.width as i32 - width - margin;
+    let bottom = work_area.position.y + work_area.size.height as i32 - height - margin;
+
+    Some((
+        state.x.clamp(left, right.max(left)),
+        state.y.clamp(top, bottom.max(top)),
+    ))
 }
 
 fn anchored_position(
@@ -328,6 +376,42 @@ fn fallback_corner_position(
     let y = work_area.position.y + work_area.size.height as i32 - height - margin;
 
     (x, y)
+}
+
+fn tray_metrics_window_state_path() -> io::Result<PathBuf> {
+    let Some(config_dir) = dirs::config_dir() else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "无法定位系统配置目录",
+        ));
+    };
+
+    Ok(config_dir
+        .join("rust-switchhost")
+        .join(METRICS_WINDOW_STATE_FILE))
+}
+
+pub fn load_saved_metrics_window_state() -> io::Result<Option<TrayMetricsWindowState>> {
+    let path = tray_metrics_window_state_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(path)?;
+    let state = serde_json::from_str::<TrayMetricsWindowState>(&content)
+        .map_err(|error| io::Error::other(error.to_string()))?;
+
+    Ok(Some(state))
+}
+
+pub fn save_metrics_window_state(state: TrayMetricsWindowState) -> io::Result<()> {
+    let path = tray_metrics_window_state_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let content = serde_json::to_vec(&state).map_err(|error| io::Error::other(error.to_string()))?;
+    fs::write(path, content)
 }
 
 fn metrics_refresh_interval() -> Duration {

@@ -48,6 +48,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::restart_app,
+            commands::get_tray_metrics_window_state,
+            commands::set_tray_metrics_window_state,
             commands::hosts::check_hosts_permission,
             commands::hosts::get_hosts_content,
             commands::hosts::write_hosts_content,
