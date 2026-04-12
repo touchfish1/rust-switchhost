@@ -72,6 +72,14 @@ impl MetricsSnapshot {
             format_rate(self.upload_bytes_per_sec)
         )
     }
+
+    fn status_bar_title(self) -> String {
+        format!(
+            "CPU {}% | MEM {}%",
+            self.cpu_usage.round() as u64,
+            self.memory_percent()
+        )
+    }
 }
 
 impl<R: Runtime> TrayController<R> {
@@ -79,6 +87,9 @@ impl<R: Runtime> TrayController<R> {
         let _ = self.cpu_item.set_text(snapshot.cpu_menu_text());
         let _ = self.memory_item.set_text(snapshot.memory_menu_text());
         let _ = self.network_item.set_text(snapshot.network_menu_text());
+        if cfg!(target_os = "linux") {
+            let _ = self.tray.set_title(Some(snapshot.status_bar_title()));
+        }
         let _ = self.tray.app_handle().emit("metrics-updated", snapshot);
     }
 }
@@ -109,7 +120,7 @@ pub fn setup_tray<R: Runtime>(
 
     let mut builder = TrayIconBuilder::new()
         .menu(&menu)
-        .show_menu_on_left_click(false)
+        .show_menu_on_left_click(cfg!(target_os = "linux"))
         .on_tray_icon_event(|tray, event| {
             if let tauri::tray::TrayIconEvent::Click {
                 button: tauri::tray::MouseButton::Left,

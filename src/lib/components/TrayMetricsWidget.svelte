@@ -21,6 +21,7 @@
   const HISTORY_LIMIT = 24
   const MODE_STORAGE_KEY = 'tray-metrics-mode'
   const currentWindow = getCurrentWindow()
+  const isLinux = navigator.userAgent.toLowerCase().includes('linux')
 
   let metrics: MetricsSnapshot = {
     cpu_usage: 0,
@@ -87,7 +88,7 @@
     })
 
     focusedUnlisten = await currentWindow.onFocusChanged(({ payload: focused }) => {
-      if (!focused) {
+      if (!focused && !isLinux) {
         void currentWindow.hide()
       }
     })
@@ -293,7 +294,15 @@
     </div>
 
     <footer class="widget-footer">
-      <span>{widgetMode === 'compact' ? '失焦自动收起' : '拖拽后会记忆位置，失焦自动收起'}</span>
+      <span>
+        {#if isLinux}
+          Linux 下左键先看托盘菜单
+        {:else if widgetMode === 'compact'}
+          失焦自动收起
+        {:else}
+          拖拽后会记忆位置，失焦自动收起
+        {/if}
+      </span>
       <span>{lastUpdated}</span>
     </footer>
   </div>

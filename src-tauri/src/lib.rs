@@ -40,7 +40,9 @@ pub fn run() {
                 let _ = window.hide();
                 api.prevent_close();
             }
-            WindowEvent::Focused(false) if window.label() == "tray-metrics" => {
+            WindowEvent::Focused(false)
+                if window.label() == "tray-metrics" && !cfg!(target_os = "linux") =>
+            {
                 let _ = window.hide();
             }
             _ => {}
