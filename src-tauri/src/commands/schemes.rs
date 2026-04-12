@@ -10,7 +10,10 @@ pub struct AppState {
 }
 
 #[tauri::command]
-pub fn get_scheme_sync_logs(state: State<AppState>, id: String) -> Result<Vec<crate::schemes::SyncLogEntry>, String> {
+pub fn get_scheme_sync_logs(
+    state: State<AppState>,
+    id: String,
+) -> Result<Vec<crate::schemes::SyncLogEntry>, String> {
     get_scheme_sync_logs_impl(state, id).into_command_result()
 }
 
@@ -70,8 +73,14 @@ pub fn update_scheme_remote_config(
     auto_sync_enabled: bool,
     sync_interval_minutes: Option<u64>,
 ) -> Result<Scheme, String> {
-    update_scheme_remote_config_impl(state, id, remote_url, auto_sync_enabled, sync_interval_minutes)
-        .into_command_result()
+    update_scheme_remote_config_impl(
+        state,
+        id,
+        remote_url,
+        auto_sync_enabled,
+        sync_interval_minutes,
+    )
+    .into_command_result()
 }
 
 #[tauri::command]
@@ -85,7 +94,8 @@ pub async fn sync_remote_scheme(
     id: String,
     trigger: Option<String>,
 ) -> Result<Scheme, String> {
-    perform_remote_sync(&app, id, trigger.unwrap_or_else(|| "manual".to_string())).await
+    perform_remote_sync(&app, id, trigger.unwrap_or_else(|| "manual".to_string()))
+        .await
         .into_command_result()
 }
 
@@ -134,7 +144,10 @@ pub async fn perform_remote_sync(
             .map_err(|error| AppError::network(format!("拉取远程内容失败: {}", error)))?;
 
         if !response.status().is_success() {
-            return Err(AppError::network(format!("远程服务返回异常状态: {}", response.status())));
+            return Err(AppError::network(format!(
+                "远程服务返回异常状态: {}",
+                response.status()
+            )));
         }
 
         let content = response
@@ -155,7 +168,11 @@ pub async fn perform_remote_sync(
             .apply_remote_scheme_content_with_trigger(&id, content, &trigger)
             .map_err(map_scheme_error),
         Err(error_message) => {
-            let _ = manager.mark_remote_sync_error_with_trigger(&id, error_message.to_string(), &trigger);
+            let _ = manager.mark_remote_sync_error_with_trigger(
+                &id,
+                error_message.to_string(),
+                &trigger,
+            );
             Err(error_message)
         }
     };
@@ -172,7 +189,10 @@ fn lock_manager<'a>(state: &'a State<AppState>) -> AppResult<MutexGuard<'a, Sche
     Ok(state.scheme_manager.lock()?)
 }
 
-fn get_scheme_sync_logs_impl(state: State<AppState>, id: String) -> AppResult<Vec<crate::schemes::SyncLogEntry>> {
+fn get_scheme_sync_logs_impl(
+    state: State<AppState>,
+    id: String,
+) -> AppResult<Vec<crate::schemes::SyncLogEntry>> {
     let manager = lock_manager(&state)?;
     Ok(manager.get_scheme_sync_logs(&id)?)
 }
@@ -185,13 +205,22 @@ fn get_all_schemes_impl(state: State<AppState>) -> AppResult<Vec<Scheme>> {
 fn create_scheme_impl(state: State<AppState>, name: String, content: String) -> AppResult<Scheme> {
     validate_hosts_content(&content)?;
     let mut manager = lock_manager(&state)?;
-    Ok(manager.create_scheme(name, content).map_err(map_scheme_error)?)
+    Ok(manager
+        .create_scheme(name, content)
+        .map_err(map_scheme_error)?)
 }
 
-fn update_scheme_impl(state: State<AppState>, id: String, name: String, content: String) -> AppResult<Scheme> {
+fn update_scheme_impl(
+    state: State<AppState>,
+    id: String,
+    name: String,
+    content: String,
+) -> AppResult<Scheme> {
     validate_hosts_content(&content)?;
     let mut manager = lock_manager(&state)?;
-    Ok(manager.update_scheme(&id, name, content).map_err(map_scheme_error)?)
+    Ok(manager
+        .update_scheme(&id, name, content)
+        .map_err(map_scheme_error)?)
 }
 
 fn delete_scheme_impl(state: State<AppState>, id: String) -> AppResult<()> {
@@ -204,9 +233,15 @@ fn switch_scheme_impl(state: State<AppState>, id: String) -> AppResult<()> {
     Ok(manager.switch_scheme(&id).map_err(map_scheme_error)?)
 }
 
-fn set_scheme_enabled_impl(state: State<AppState>, id: String, enabled: bool) -> AppResult<Vec<Scheme>> {
+fn set_scheme_enabled_impl(
+    state: State<AppState>,
+    id: String,
+    enabled: bool,
+) -> AppResult<Vec<Scheme>> {
     let mut manager = lock_manager(&state)?;
-    Ok(manager.set_scheme_enabled(&id, enabled).map_err(map_scheme_error)?)
+    Ok(manager
+        .set_scheme_enabled(&id, enabled)
+        .map_err(map_scheme_error)?)
 }
 
 fn export_schemes_impl(state: State<AppState>, path: String) -> AppResult<()> {
@@ -251,7 +286,10 @@ async fn fetch_remote_hosts_impl(url: String) -> AppResult<String> {
         .map_err(|error| AppError::network(format!("拉取远程内容失败: {}", error)))?;
 
     if !response.status().is_success() {
-        return Err(AppError::network(format!("远程服务返回异常状态: {}", response.status())));
+        return Err(AppError::network(format!(
+            "远程服务返回异常状态: {}",
+            response.status()
+        )));
     }
 
     let content = response

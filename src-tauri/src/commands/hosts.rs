@@ -175,7 +175,8 @@ fn resolve_domain_impl(domain: String) -> AppResult<DnsLookupResult> {
 
     match (normalized.as_str(), 0).to_socket_addrs() {
         Ok(addresses) => {
-            let mut resolved: Vec<String> = addresses.map(|address| address.ip().to_string()).collect();
+            let mut resolved: Vec<String> =
+                addresses.map(|address| address.ip().to_string()).collect();
             resolved.sort();
             resolved.dedup();
 

@@ -265,14 +265,21 @@ impl SchemeManager {
             }
         });
 
-        if auto_sync_enabled && (normalized_url.is_none() || sync_interval_minutes.unwrap_or(0) == 0) {
+        if auto_sync_enabled
+            && (normalized_url.is_none() || sync_interval_minutes.unwrap_or(0) == 0)
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "启用自动同步前请先填写远程 URL 和同步间隔",
             ));
         }
 
-        if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
+        if let Some(scheme) = self
+            .config
+            .schemes
+            .iter_mut()
+            .find(|scheme| scheme.id == id)
+        {
             scheme.remote_url = normalized_url;
             scheme.auto_sync_enabled = auto_sync_enabled;
             scheme.sync_interval_minutes = if auto_sync_enabled {
@@ -301,7 +308,12 @@ impl SchemeManager {
     }
 
     pub fn mark_remote_sync_started(&mut self, id: &str, trigger: &str) -> io::Result<Scheme> {
-        if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
+        if let Some(scheme) = self
+            .config
+            .schemes
+            .iter_mut()
+            .find(|scheme| scheme.id == id)
+        {
             if scheme.sync_status == "syncing" {
                 return Err(io::Error::new(
                     io::ErrorKind::WouldBlock,
@@ -335,7 +347,12 @@ impl SchemeManager {
             .iter()
             .any(|scheme_id| scheme_id == id);
 
-        if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
+        if let Some(scheme) = self
+            .config
+            .schemes
+            .iter_mut()
+            .find(|scheme| scheme.id == id)
+        {
             scheme.content = content;
             scheme.last_synced_at = Some(Utc::now());
             scheme.last_sync_error = None;
@@ -351,7 +368,10 @@ impl SchemeManager {
                 scheme,
                 "success",
                 trigger,
-                scheme.last_sync_message.clone().unwrap_or_else(|| "远程同步成功".to_string()),
+                scheme
+                    .last_sync_message
+                    .clone()
+                    .unwrap_or_else(|| "远程同步成功".to_string()),
             );
             scheme.updated_at = Utc::now();
         } else {
@@ -363,7 +383,12 @@ impl SchemeManager {
         }
 
         self.sync_enabled_flags();
-        if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
+        if let Some(scheme) = self
+            .config
+            .schemes
+            .iter_mut()
+            .find(|scheme| scheme.id == id)
+        {
             Self::flush_scheme_logs_at(&self.sync_log_path, scheme)?;
         }
         self.save_config()?;
@@ -376,17 +401,28 @@ impl SchemeManager {
         error_message: String,
         trigger: &str,
     ) -> io::Result<Scheme> {
-        if let Some(scheme) = self.config.schemes.iter_mut().find(|scheme| scheme.id == id) {
+        if let Some(scheme) = self
+            .config
+            .schemes
+            .iter_mut()
+            .find(|scheme| scheme.id == id)
+        {
             scheme.last_sync_error = Some(error_message);
             scheme.sync_status = "error".to_string();
             scheme.last_sync_message = scheme.last_sync_error.clone();
             scheme.consecutive_failures = scheme.consecutive_failures.saturating_add(1);
             scheme.next_retry_at = if scheme.auto_sync_enabled {
-                Some(Utc::now() + Duration::minutes(Self::retry_delay_minutes(scheme.consecutive_failures)))
+                Some(
+                    Utc::now()
+                        + Duration::minutes(Self::retry_delay_minutes(scheme.consecutive_failures)),
+                )
             } else {
                 None
             };
-            let message = scheme.last_sync_error.clone().unwrap_or_else(|| "未知同步错误".to_string());
+            let message = scheme
+                .last_sync_error
+                .clone()
+                .unwrap_or_else(|| "未知同步错误".to_string());
             Self::push_sync_log(scheme, "error", trigger, message);
             scheme.updated_at = Utc::now();
             Self::flush_scheme_logs_at(&self.sync_log_path, scheme)?;
@@ -448,7 +484,10 @@ impl SchemeManager {
         })
     }
 
-    fn save_sync_logs_to(path: &PathBuf, logs: &HashMap<String, Vec<SyncLogEntry>>) -> io::Result<()> {
+    fn save_sync_logs_to(
+        path: &PathBuf,
+        logs: &HashMap<String, Vec<SyncLogEntry>>,
+    ) -> io::Result<()> {
         let content = serde_json::to_string_pretty(logs)?;
         fs::write(path, content)
     }
@@ -520,7 +559,11 @@ impl SchemeManager {
                 .find(|scheme| scheme.id == active_id)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Scheme not found"))?;
 
-            merged_contents.push(format!("# Group: {}\n{}", scheme.name, scheme.content.trim()));
+            merged_contents.push(format!(
+                "# Group: {}\n{}",
+                scheme.name,
+                scheme.content.trim()
+            ));
         }
 
         let merged = merged_contents.join("\n\n");
@@ -530,7 +573,12 @@ impl SchemeManager {
     }
 
     fn make_unique_scheme_name(&self, base_name: &str) -> String {
-        if !self.config.schemes.iter().any(|scheme| scheme.name == base_name) {
+        if !self
+            .config
+            .schemes
+            .iter()
+            .any(|scheme| scheme.name == base_name)
+        {
             return base_name.to_string();
         }
 
@@ -552,7 +600,10 @@ impl SchemeManager {
     fn validate_scheme_name(&self, name: &str, exclude_id: Option<&str>) -> io::Result<String> {
         let trimmed_name = name.trim();
         if trimmed_name.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "分组名称不能为空"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "分组名称不能为空",
+            ));
         }
 
         let normalized = trimmed_name.to_lowercase();
@@ -613,7 +664,10 @@ impl SchemeManager {
 
         for index in 0..self.config.schemes.len() {
             if !self.config.schemes[index].sync_logs.is_empty() {
-                let _ = Self::flush_scheme_logs_at(&self.sync_log_path, &mut self.config.schemes[index]);
+                let _ = Self::flush_scheme_logs_at(
+                    &self.sync_log_path,
+                    &mut self.config.schemes[index],
+                );
                 changed = true;
             }
         }
@@ -662,14 +716,16 @@ impl SchemeManager {
             return minimum;
         }
 
-        let until_due = (next_due_at - now)
-            .to_std()
-            .unwrap_or(minimum);
+        let until_due = (next_due_at - now).to_std().unwrap_or(minimum);
 
         until_due.clamp(minimum, maximum)
     }
 
-    fn next_due_at_for_scheme(&self, scheme: &Scheme, _now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    fn next_due_at_for_scheme(
+        &self,
+        scheme: &Scheme,
+        _now: DateTime<Utc>,
+    ) -> Option<DateTime<Utc>> {
         let remote_url = scheme.remote_url.as_ref()?.trim();
         let interval = scheme.sync_interval_minutes?;
         if !scheme.auto_sync_enabled || remote_url.is_empty() || interval == 0 {
@@ -766,7 +822,8 @@ mod tests {
     #[test]
     fn updating_enabled_scheme_rewrites_managed_hosts_file() {
         let _guard = test_env_lock().lock().expect("lock poisoned");
-        let temp_root = std::env::temp_dir().join(format!("rust-switchhost-test-{}", uuid::Uuid::new_v4()));
+        let temp_root =
+            std::env::temp_dir().join(format!("rust-switchhost-test-{}", uuid::Uuid::new_v4()));
         let hosts_path = temp_root.join("hosts");
         let backup_dir = temp_root.join("backups");
         let config_path = temp_root.join("schemes.json");
@@ -784,9 +841,14 @@ mod tests {
                 sync_log_path,
             };
 
-            let scheme = manager.create_scheme("Local".to_string(), "1.1.1.1 before.test".to_string())?;
+            let scheme =
+                manager.create_scheme("Local".to_string(), "1.1.1.1 before.test".to_string())?;
             manager.set_scheme_enabled(&scheme.id, true)?;
-            manager.update_scheme(&scheme.id, "Local".to_string(), "2.2.2.2 after.test".to_string())?;
+            manager.update_scheme(
+                &scheme.id,
+                "Local".to_string(),
+                "2.2.2.2 after.test".to_string(),
+            )?;
 
             let written = fs::read_to_string(&hosts_path)?;
             assert!(written.contains("127.0.0.1 localhost"));

@@ -29,16 +29,21 @@ pub fn run() {
                 }
             }
 
-            tray::setup_tray(&app.handle())?;
+            let tray_controller = tray::setup_tray(&app.handle())?;
+            tray::start_metrics_monitor(tray_controller);
             start_background_sync(app.handle().clone());
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 let _ = window.hide();
                 api.prevent_close();
             }
+            WindowEvent::Focused(false) if window.label() == "tray-metrics" => {
+                let _ = window.hide();
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
@@ -79,10 +84,7 @@ fn start_background_sync(app: AppHandle) {
                         manager.get_due_sync_jobs(),
                         manager.get_next_sync_wait_duration(),
                     ),
-                    Err(_) => (
-                        Vec::new(),
-                        std::time::Duration::from_secs(30),
-                    ),
+                    Err(_) => (Vec::new(), std::time::Duration::from_secs(30)),
                 };
                 next_cycle
             };

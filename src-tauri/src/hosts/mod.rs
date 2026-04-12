@@ -65,7 +65,11 @@ pub fn read_hosts_file() -> io::Result<String> {
 
 pub fn can_write_hosts_file() -> io::Result<()> {
     let path = get_hosts_path();
-    OpenOptions::new().read(true).write(true).open(path).map(|_| ())
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map(|_| ())
 }
 
 const MANAGED_BLOCK_START: &str = "# >>> rust-switchhost managed start >>>";
@@ -151,7 +155,9 @@ pub fn list_backup_files() -> io::Result<Vec<HostsBackupEntry>> {
         }
 
         let metadata = entry.metadata()?;
-        let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        let modified = metadata
+            .modified()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
         let created_at = chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339();
 
         let content = fs::read_to_string(&path).unwrap_or_default();
@@ -186,16 +192,16 @@ pub fn restore_backup_file(path: &str) -> io::Result<()> {
 }
 
 fn merge_managed_hosts_content(current_content: &str, managed_content: &str) -> String {
-    let base_content = strip_managed_hosts_block(current_content).trim_end().to_string();
+    let base_content = strip_managed_hosts_block(current_content)
+        .trim_end()
+        .to_string();
     let managed_content = managed_content.trim();
 
     if managed_content.is_empty() {
         return finalize_hosts_content(base_content);
     }
 
-    let managed_block = format!(
-        "{MANAGED_BLOCK_START}\n{managed_content}\n{MANAGED_BLOCK_END}"
-    );
+    let managed_block = format!("{MANAGED_BLOCK_START}\n{managed_content}\n{MANAGED_BLOCK_END}");
 
     if base_content.is_empty() {
         return finalize_hosts_content(managed_block);
@@ -297,7 +303,9 @@ fn write_hosts_file_with_pkexec(content: &str) -> io::Result<()> {
         Ok(status) => {
             let _ = cleanup_result;
             let message = match status.code() {
-                Some(126) => "pkexec 无法执行 install，请确认系统已安装 polkit 和 coreutils".to_string(),
+                Some(126) => {
+                    "pkexec 无法执行 install，请确认系统已安装 polkit 和 coreutils".to_string()
+                }
                 Some(127) => "pkexec 未找到 /usr/bin/install，请确认系统环境完整".to_string(),
                 Some(code) => format!("pkexec 提权写入 /etc/hosts 失败，退出码: {}", code),
                 None => "pkexec 提权写入 /etc/hosts 被中断".to_string(),
@@ -308,7 +316,10 @@ fn write_hosts_file_with_pkexec(content: &str) -> io::Result<()> {
             let _ = cleanup_result;
             Err(io::Error::new(
                 error.kind(),
-                format!("无法启动 pkexec。请确认系统已安装 polkit，并在桌面会话中运行应用: {}", error),
+                format!(
+                    "无法启动 pkexec。请确认系统已安装 polkit，并在桌面会话中运行应用: {}",
+                    error
+                ),
             ))
         }
     }
@@ -365,7 +376,11 @@ fn resolve_backup_path(path: &str) -> io::Result<PathBuf> {
         ));
     }
 
-    if requested.extension().and_then(|extension| extension.to_str()) != Some("bak") {
+    if requested
+        .extension()
+        .and_then(|extension| extension.to_str())
+        != Some("bak")
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "仅支持恢复 .bak 备份文件",
@@ -461,6 +476,9 @@ mod tests {
         let merged = merge_managed_hosts_content(&current, "");
 
         assert_eq!(merged, "127.0.0.1 localhost\n# custom keep\n");
-        assert_eq!(strip_managed_hosts_block(&current), "127.0.0.1 localhost\n# custom keep");
+        assert_eq!(
+            strip_managed_hosts_block(&current),
+            "127.0.0.1 localhost\n# custom keep"
+        );
     }
 }

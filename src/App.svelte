@@ -1,9 +1,17 @@
 <script lang="ts">
+  import { getCurrentWindow } from '@tauri-apps/api/window'
   import App from './lib/App.svelte'
+  import TrayMetricsWidget from './lib/components/TrayMetricsWidget.svelte'
+
+  const isTrayMetricsWindow = getCurrentWindow().label === 'tray-metrics'
 </script>
 
 <main>
-  <App />
+  {#if isTrayMetricsWindow}
+    <TrayMetricsWidget />
+  {:else}
+    <App />
+  {/if}
 </main>
 
 <style>
@@ -16,5 +24,9 @@
   
   :global(*) {
     box-sizing: border-box;
+  }
+
+  main {
+    min-height: 100vh;
   }
 </style>
