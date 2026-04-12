@@ -80,6 +80,15 @@ impl MetricsSnapshot {
             self.memory_percent()
         )
     }
+
+    fn tray_tooltip_text(self) -> String {
+        format!(
+            "{}\n{}\n{}",
+            self.cpu_menu_text(),
+            self.memory_menu_text(),
+            self.network_menu_text()
+        )
+    }
 }
 
 impl<R: Runtime> TrayController<R> {
@@ -87,8 +96,11 @@ impl<R: Runtime> TrayController<R> {
         let _ = self.cpu_item.set_text(snapshot.cpu_menu_text());
         let _ = self.memory_item.set_text(snapshot.memory_menu_text());
         let _ = self.network_item.set_text(snapshot.network_menu_text());
-        if cfg!(target_os = "linux") {
+        if cfg!(not(target_os = "windows")) {
             let _ = self.tray.set_title(Some(snapshot.status_bar_title()));
+        }
+        if cfg!(not(target_os = "linux")) {
+            let _ = self.tray.set_tooltip(Some(snapshot.tray_tooltip_text()));
         }
         let _ = self.tray.app_handle().emit("metrics-updated", snapshot);
     }
