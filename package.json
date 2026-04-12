@@ -1,13 +1,14 @@
 {
   "name": "rust-switchhost",
-  "version": "0.0.47",
+  "version": "0.0.48",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release:github": "node scripts/release-github.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
